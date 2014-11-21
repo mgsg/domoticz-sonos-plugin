@@ -17,6 +17,7 @@ typedef struct __DeviceSessionData {
 	unsigned char		level;
 	int					prev_state;
 	char				*prev_uri;	
+	std::string			coordinator;
 } DeviceSessionData;
 #endif
 
@@ -37,18 +38,24 @@ public:
 	// Hardware-->Domoticz
 	void UpdateValueEasy(int qType, const std::string& devId, const std::string& devName, const std::string& devValue, int level );
 	
-	// Sonos specific public methods/actions
-	bool SonosActionGetPlay1Temperature(const std::string& devID, std::string& temperature);
-	void SonosActionPause(const std::string& devID);
-	void SonosActionPlay(const std::string& devID);
-	void SonosActionSetVolume(const std::string& devID, int volume);
-	int  SonosActionGetVolume(const std::string& devID);
+	// Sonos UPnP AV specific public methods/actions
+	bool SonosActionPause(const std::string& devID);
+	bool SonosActionPlay(const std::string& devID);
 	bool SonosActionPlayURI(const std::string& devID, const std::string& uri);
-	bool SonosActionSay(const std::string& tts, std::string& url);
-	void SonosActionGetPositionInfo(const std::string& deviceID);
-
+	bool SonosActionGetPositionInfo(const std::string& deviceID);
 	bool SonosGetRendererAVTransport(const std::string& deviceID, DeviceSessionData **upnprenderer, GUPnPServiceProxy **av_transport);
-	void SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
+
+	// Sonos UPnP Rendering Control specific public methods/actions
+	bool SonosActionSetVolume(const std::string& devID, int volume);
+	int  SonosActionGetVolume(const std::string& devID);
+
+	// Sonos other UPnP methods
+	bool SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
+
+	// Sonos non-UPnP
+	bool SonosActionSay(const std::string& tts, std::string& url);
+	bool SonosSaveState(const std::string& devID);
+	bool SonosActionGetPlay1Temperature(const std::string& devID, std::string& temperature);
 
 private:
 	bool								m_bEnabled;
