@@ -1450,9 +1450,9 @@ std::string helperGetUserVariable(const std::string &name)
 			std::string currentrackuri(CurrentTrackURI);
 			std::string zone_coordinator = currentrackuri.substr(9, std::string::npos);
 			_log.Log(LOG_NORM,"(Sonos) Track - same as zone coordinator [%s]", zone_coordinator.c_str());
-			upnprenderer->coordinator = zone_coordinator;
+//			upnprenderer->coordinator = zone_coordinator;
 		} else {
-			upnprenderer->coordinator = "";
+//			upnprenderer->coordinator = "";
 		}
 
 #ifdef _DEBUG

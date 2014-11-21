@@ -17,7 +17,7 @@ typedef struct __DeviceSessionData {
 	unsigned char		level;
 	int					prev_state;
 	char				*prev_uri;	
-	std::string			coordinator;
+//	std::string			coordinator;
 } DeviceSessionData;
 #endif
 
