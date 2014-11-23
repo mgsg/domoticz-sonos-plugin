@@ -11,13 +11,14 @@
 typedef struct __DeviceSessionData {
 	char				*id;
 	char				*udn;
+	char				*name;
 	unsigned long		ip;
 	int					type;
 	GUPnPDeviceProxy	*renderer;
 	unsigned char		level;
 	int					prev_state;
 	char				*prev_uri;	
-//	std::string			coordinator;
+	char				*coordinator;
 } DeviceSessionData;
 #endif
 
@@ -39,22 +40,25 @@ public:
 	void UpdateValueEasy(int qType, const std::string& devId, const std::string& devName, const std::string& devValue, int level );
 	
 	// Sonos UPnP AV specific public methods/actions
-	bool SonosActionPause(const std::string& devID);
-	bool SonosActionPlay(const std::string& devID);
-	bool SonosActionPlayURI(const std::string& devID, const std::string& uri);
-	bool SonosActionGetPositionInfo(const std::string& deviceID);
-	bool SonosGetRendererAVTransport(const std::string& deviceID, DeviceSessionData **upnprenderer, GUPnPServiceProxy **av_transport);
+	bool SonosActionPause(GUPnPServiceProxy *av_transport);
+	bool SonosActionNext(GUPnPServiceProxy *av_transport);
+	bool SonosActionPrevious(GUPnPServiceProxy *av_transport);
+	bool SonosActionPlay(GUPnPServiceProxy *av_transport);
+	bool SonosActionSetURI(GUPnPServiceProxy *av_transport, const std::string& uri, bool bSonos);
+	bool SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, bool bSonos);
+	bool SonosActionGetPositionInfo(GUPnPServiceProxy *av_transport, std::string& currenturi);
+	bool SonosActionGetTransportInfo(GUPnPServiceProxy *av_transport, std::string& state);
 
 	// Sonos UPnP Rendering Control specific public methods/actions
 	bool SonosActionSetVolume(const std::string& devID, int volume);
 	int  SonosActionGetVolume(const std::string& devID);
 
 	// Sonos other UPnP methods
+	bool SonosGetRendererAVTransport(const std::string& deviceID, DeviceSessionData **upnprenderer, GUPnPServiceProxy **av_transport);
 	bool SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
 
 	// Sonos non-UPnP
 	bool SonosActionSay(const std::string& tts, std::string& url);
-	bool SonosSaveState(const std::string& devID);
 	bool SonosActionGetPlay1Temperature(const std::string& devID, std::string& temperature);
 
 private:
