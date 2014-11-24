@@ -336,8 +336,8 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 
 				SonosActionSetURI(av_transport, sURL, bMetadata);
 				SonosActionPlay(av_transport);
-				if (upnprenderer->type == UPNP_SONOS)
-					SonosActionSetNextURI(av_transport, currenturi, bMetadata);
+//				if (upnprenderer->type == UPNP_SONOS)
+//					SonosActionSetNextURI(av_transport, currenturi, bMetadata);
 #ifdef _DEBUG
 				_log.Log(LOG_NORM,"(Sonos) WriteToHardware Say devid %8X cmnd %d unit %d level %d", 
 					ulIpAddress, cmnd, unit, level);
@@ -374,8 +374,8 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 			// Set URL
 			SonosActionSetURI(av_transport, sURL, bMetadata);
 			SonosActionPlay(av_transport);
-			if (upnprenderer->type == UPNP_SONOS)
-				SonosActionSetNextURI(av_transport, currenturi, bMetadata);
+//			if (upnprenderer->type == UPNP_SONOS)
+//				SonosActionSetNextURI(av_transport, currenturi, bMetadata);
 #ifdef _DEBUG
 			_log.Log(LOG_NORM,"(Sonos) WriteToHardware Preset devid %8X cmnd %d unit %d level %d", 
 						ulIpAddress, cmnd, unit, level);
@@ -879,7 +879,7 @@ std::string helperGetUserVariable(const std::string &name)
 			thisInstance->SonosActionGetPositionInfo(av_transport, state);
 
 #ifdef _DEBUG_CHANGE
-			_log.Log(LOG_NORM,"(Sonos) Change GetPositionInfo %s [%s]", upnprenderer->name, state.c_str() );
+			_log.Log(LOG_NORM,"(Sonos) Change GetPositionInfo %s-%s", upnprenderer->name, state.c_str() );
 #endif
 				
 			/* Get volume level */
@@ -1061,7 +1061,10 @@ std::string helperGetUserVariable(const std::string &name)
 		upnprenderer = (DeviceSessionData *)g_hash_table_lookup(ipstore, szDeviceID);
 
 #ifdef _DEBUG
-		_log.Log(LOG_STATUS,"(Sonos) DeviceUnavailable %s", upnprenderer->name);
+		if (upnprenderer->name != NULL)
+			_log.Log(LOG_STATUS,"(Sonos) DeviceUnavailable %s", upnprenderer->name);
+		else
+			_log.Log(LOG_STATUS,"(Sonos) DeviceUnavailable name-unavailable %s", upnprenderer->id);
 #endif
 
 		/* Remove device from list of current devices */

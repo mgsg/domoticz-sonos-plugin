@@ -142,8 +142,6 @@ ADD_CUSTOM_COMMAND(TARGET revisiontag COMMAND ${CMAKE_COMMAND}
 set(
 domoticz_SRCS
 main/stdafx.cpp
-hardware/SonosPlugin.cpp
-hardware/HardwarePluginSample.cpp
 main/CmdLine.cpp
 main/Camera.cpp
 main/domoticz.cpp
@@ -185,13 +183,21 @@ hardware/HarmonyHub.cpp
 hardware/ICYThermostat.cpp
 hardware/Limitless.cpp
 hardware/Meteostick.cpp
+hardware/MochadTCP.cpp
 hardware/OpenZWave.cpp
+hardware/openzwave/control_panel/ozwcp.cpp
+hardware/openzwave/control_panel/zwavelib.cpp
+hardware/openzwave/control_panel/tinyxml/tinystr.cpp
+hardware/openzwave/control_panel/tinyxml/tinyxml.cpp
+hardware/openzwave/control_panel/tinyxml/tinyxmlerror.cpp
+hardware/openzwave/control_panel/tinyxml/tinyxmlparser.cpp
 hardware/OTGWBase.cpp
 hardware/OTGWSerial.cpp
 hardware/OTGWTCP.cpp
 hardware/P1MeterBase.cpp
 hardware/P1MeterSerial.cpp
 hardware/P1MeterTCP.cpp
+hardware/PhilipsHue.cpp
 hardware/PiFace.cpp
 hardware/PVOutput_Input.cpp
 hardware/Razberry.cpp
@@ -200,10 +206,11 @@ hardware/RFXComSerial.cpp
 hardware/RFXComTCP.cpp
 hardware/S0MeterBase.cpp
 hardware/S0MeterSerial.cpp
-hardware/SMASpot.cpp
+hardware/SBFSpot.cpp
 hardware/smbus.cpp
 hardware/SolarEdgeBase.cpp
 hardware/SolarEdgeTCP.cpp
+hardware/SonosPlugin.cpp
 hardware/TCPProxy/tcpproxy_server.cpp
 hardware/TE923.cpp
 hardware/TE923Tool.cpp
@@ -291,7 +298,7 @@ ENDIF(LIBUSB_FOUND)
 #ENDIF(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
 
 # try to find open-zwave, if found, include support
-find_library(OpenZWave NAMES libopenzwave.a HINTS "../open-zwave-read-only")
+find_library(OpenZWave NAMES libopenzwave.a HINTS "../open-zwave-read-only" "../open-zwave-read-only/cpp/build")
 IF(OpenZWave)
   message(STATUS ${OpenZWave})
   target_link_libraries(domoticz ${OpenZWave})
@@ -331,7 +338,7 @@ IF(RaspberryPi)
 		IF(WIRINGPI_LIBRARY)
 			message(STATUS "WiringPi library was found in ${WIRINGPI_LIBRARY}...")
 			add_definitions(-DWITH_GPIO)
- 			target_link_libraries(domoticz ${WIRINGPI_LIBRARY})		
+			target_link_libraries(domoticz ${WIRINGPI_LIBRARY})		
 		else()
 			message(STATUS "==== WiringPi library not found. GPIO support disabled.")
 		message(STATUS "==== (Please follow http://wiringpi.com/download-and-install/ if you want to use GPIO.)")
@@ -344,7 +351,7 @@ else()
 	message(STATUS "Not building on Raspberry Pi. GPIO support disabled.")
 ENDIF(RaspberryPi)
 
-# Added for Sonos/UPnP support
+# Added for Sonos / UPnP support
 find_path(gUPnP NAMES gupnp.h HINTS "/usr/include/gupnp-1.0/libgupnp")
 IF(gUPnP)
   MESSAGE(STATUS "gUPnP includes found at: ${gUPnP}")
@@ -353,7 +360,7 @@ IF(gUPnP)
 else()
   MESSAGE(FATAL_ERROR "gUPnP not found on your system, see install.txt how to get them installed. (for example 'sudo apt-get install gupnp-1.0 gssdp-1.0 gupnp-av-1.0 glib-2.0 gobject-2.0 gthread-2.0')")
 ENDIF(gUPnP)
-#end Sonos/UPnP support
+#end Sonos / UPnP support
 
 target_link_libraries(domoticz ${Boost_LIBRARIES} ${SQLITE3_LIBRARY} ${ZLIB_LIBRARIES} ${CURL_LIBRARIES} pthread lua ${CMAKE_DL_LIBS})
 
