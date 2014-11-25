@@ -9,16 +9,21 @@
 #include <libsoup/soup.h>
 
 typedef struct __DeviceSessionData {
-	char				*id;
-	char				*udn;
-	char				*name;
 	unsigned long		ip;
 	int					type;
-	GUPnPDeviceProxy	*renderer;
 	unsigned char		level;
 	int					prev_state;
-	char				*prev_uri;	
-	char				*coordinator;
+	std::string			id;
+	std::string			udn;
+	std::string			name;
+	std::string			prev_uri;	
+	std::string			coordinator;
+//	char				*id;
+//	char				*udn;
+//	char				*name;
+//	char				*prev_uri;	
+//	char				*coordinator;
+	GUPnPDeviceProxy	*renderer;
 } DeviceSessionData;
 #endif
 
@@ -44,8 +49,8 @@ public:
 	bool SonosActionNext(GUPnPServiceProxy *av_transport);
 	bool SonosActionPrevious(GUPnPServiceProxy *av_transport);
 	bool SonosActionPlay(GUPnPServiceProxy *av_transport);
-	bool SonosActionSetURI(GUPnPServiceProxy *av_transport, const std::string& uri, bool bSonos);
-	bool SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, bool bSonos);
+	bool SonosActionSetURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type);
+	bool SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type);
 	bool SonosActionGetPositionInfo(GUPnPServiceProxy *av_transport, std::string& currenturi);
 	bool SonosActionGetTransportInfo(GUPnPServiceProxy *av_transport, std::string& state);
 
@@ -58,7 +63,7 @@ public:
 	bool SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
 
 	// Sonos non-UPnP
-	bool SonosActionSay(const std::string& tts, std::string& url);
+	bool SonosActionSay(const std::string& tts, std::string& url, int type);
 	bool SonosActionGetPlay1Temperature(const std::string& devID, std::string& temperature);
 
 private:

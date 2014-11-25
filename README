@@ -24,6 +24,7 @@ Known bugs/limitations:
     - Polling inteval must be lower than 20secs; if not: you get Error:
     Sonos hardware (11) thread seems to have ended unexpectedly
     - Play:1 temp sensor monitor disabled by default -limited interest for HA
+    - Avoid playing if URI=No stream!!!
 
 Runtime instructions:
 
