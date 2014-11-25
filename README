@@ -1,3 +1,7 @@
+Changes in v0.47:
+    - Moved from Glib HashTable to Boost unordered_map
+    - XBMC is not able to play a file from Domoticz WebServer. It is working with other radio servers.
+
 Changes in v0.46:
     - Deleted line in CMakeLists.txt for a now-deleted HardwarePluginSample.cpp
     - Some changes to try to support XBMC-Kodi (returning (null) metadata even if the function succeeds!). Play/Pause working now.

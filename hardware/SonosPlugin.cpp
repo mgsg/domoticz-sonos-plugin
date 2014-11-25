@@ -358,7 +358,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 			std::string sURL = "http://192.168.1.63:8888/media/tts-text.mp3";
 			bool ret;
 
-//			ret = SonosActionSay( text, sURL, upnprenderer->type );
+			ret = SonosActionSay( text, sURL, upnprenderer->type );
 			ret = true;
 			if (ret) {
 				_log.Log(LOG_NORM,"(Sonos) Say \'%s\' saved to \'%s\'", text.c_str(), sURL.c_str());
