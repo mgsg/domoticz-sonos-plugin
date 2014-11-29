@@ -1,3 +1,7 @@
+Changes in v0.48
+    - First steps to save Sonos state before TTS:
+    	- Support MediaServer in addition to MediaRenderer UPnP interfaces - SaveQueue method - still wip 
+
 Changes in v0.47:
     - Moved from Glib HashTable to Boost unordered_map
     - XBMC is not able to play a file from Domoticz WebServer. It is working with other radio servers.
