@@ -24,6 +24,9 @@ typedef struct __DeviceSessionData {
 //	char				*prev_uri;	
 //	char				*coordinator;
 	GUPnPDeviceProxy	*renderer;
+	GUPnPServiceProxy   *av_transport;
+	GUPnPServiceProxy   *rendering_control;
+	GUPnPServiceProxy   *content_directory;
 } DeviceSessionData;
 #endif
 
@@ -53,18 +56,25 @@ public:
 	bool SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type);
 	bool SonosActionGetPositionInfo(GUPnPServiceProxy *av_transport, std::string& currenturi);
 	bool SonosActionGetTransportInfo(GUPnPServiceProxy *av_transport, std::string& state);
+	bool SonosActionLeaveGroup(GUPnPServiceProxy *av_transport);
 
 	// Sonos UPnP Rendering Control specific public methods/actions
-	bool SonosActionSetVolume(const std::string& devID, int volume);
-	int  SonosActionGetVolume(const std::string& devID);
+	bool SonosActionSetVolume(DeviceSessionData *upnprenderer, int volume);
+	int  SonosActionGetVolume(DeviceSessionData *upnprenderer);
+
+	// Sonos UPnP Content Directory
+	bool SonosActionSaveQueue(DeviceSessionData *upnprenderer);
+	bool SonosActionLoadQueue(DeviceSessionData *upnprenderer, std::string& sURL);
 
 	// Sonos other UPnP methods
-	bool SonosGetRendererAVTransport(const std::string& deviceID, DeviceSessionData **upnprenderer, GUPnPServiceProxy **av_transport);
+	bool SonosGetRenderer(const std::string& deviceID, DeviceSessionData **upnprenderer);
+	bool SonosGetServiceAVTransport(DeviceSessionData *upnprenderer, GUPnPServiceProxy **av_transport);
+	bool SonosGetServiceRenderingControl(DeviceSessionData *upnprenderer, GUPnPServiceProxy **rendering_control);
 	bool SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
 
 	// Sonos non-UPnP
 	bool SonosActionSay(const std::string& tts, std::string& url, int type);
-	bool SonosActionGetPlay1Temperature(const std::string& devID, std::string& temperature);
+	bool SonosActionGetPlay1Temperature(DeviceSessionData *upnprenderer, std::string& temperature);
 
 private:
 	bool								m_bEnabled;
@@ -83,6 +93,10 @@ private:
 #ifdef WIN32
 // Sorry No WIN32 support yet
 #elif defined __linux__
+	// GUPnP internal state
+	GUPnPContext *context;
+	GUPnPControlPoint *cp;
+
     void SonosInit(void);
 #endif
 };
