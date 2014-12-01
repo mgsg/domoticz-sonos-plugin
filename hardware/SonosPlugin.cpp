@@ -54,6 +54,7 @@
 /*| v0.4 TTS device for Sonos speakers using Google Traslate. Presets.         |*/
 /*| v0.5 Play/Pause working on XBMC - possibly on other UPnP devices too       |*/
 /*+----------------------------------------------------------------------------+*/
+
 #include "stdafx.h"
 #include "SonosPlugin.h"
 #include "../main/Helper.h"
