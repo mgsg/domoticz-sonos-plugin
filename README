@@ -1,3 +1,8 @@
+R E A D M E
+===========
+
+This is a hardware plugin for the excellent Domoticz home automation system. Please visit Domoticz website http://www.domoticz.com for more info.
+
 Changes in v0.48
     - First steps to save Sonos state before TTS:
     	- Support MediaServer in addition to MediaRenderer UPnP interfaces - SaveQueue method - still wip 
