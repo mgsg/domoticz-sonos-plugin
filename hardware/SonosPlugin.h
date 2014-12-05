@@ -1,4 +1,23 @@
-
+/*+----------------------------------------------------------------------------+*/
+/*| Permission is hereby granted, free of charge, to any person obtaining a    |*/
+/*| copy of this software and associated documentation files (the "Software"), |*/
+/*| to deal in the Software without restriction, including without limitation  |*/
+/*| the rights to use, copy, modify, merge, publish, distribute, sublicense,   |*/
+/*| and/or sell copies of the Software, and to permit persons to whom the      |*/
+/*| Software is furnished to do so, subject to the following conditions:       |*/
+/*|                                                                            |*/
+/*| The above copyright notice and this permission notice shall be included    |*/
+/*| in all copies or substantial portions of the Software.                     |*/
+/*|                                                                            |*/
+/*| THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR |*/
+/*| IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,   |*/
+/*| FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL    |*/
+/*| THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER |*/
+/*| LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING    |*/
+/*| FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER        |*/
+/*| DEALINGS IN THE SOFTWARE.                                                  |*/
+/*|                                                                            |*/
+/*+----------------------------------------------------------------------------+*/
 #pragma once
 //#include "../main/RFXtrx.h" 
 #include "DomoticzHardware.h"
@@ -8,28 +27,40 @@
 #include <libgupnp/gupnp-control-point.h>
 #include <libgupnp-av/gupnp-av.h>
 #include <libsoup/soup.h>
+#endif
 
-typedef struct __DeviceSessionData {
+typedef struct __RendererDeviceData {
 	unsigned long		ip;
-	int					type;
+	unsigned char		type;
 	unsigned char		level;
-	int					prev_state;
+	unsigned char		prev_state;
+	unsigned char		protocol;
+	bool				restore_state;
 	std::string			id;
 	std::string			udn;
 	std::string			name;
 	std::string			prev_uri;	
 	std::string			coordinator;
-//	char				*id;
-//	char				*udn;
-//	char				*name;
-//	char				*prev_uri;	
-//	char				*coordinator;
+
+#if defined __linux__
 	GUPnPDeviceProxy	*renderer;
 	GUPnPServiceProxy   *av_transport;
 	GUPnPServiceProxy   *rendering_control;
-	GUPnPServiceProxy   *content_directory;
-} DeviceSessionData;
 #endif
+} RendererDeviceData;
+
+typedef struct __ServerDeviceData {
+	unsigned long		ip;
+	int					type;
+	std::string			id;
+	std::string			udn;
+	std::string			name;
+#if defined __linux__
+	GUPnPDeviceProxy	*server;
+	GUPnPServiceProxy   *av_transport;
+#endif
+} ServerDeviceData;
+
 
 #if defined WIN32 
 // Sorry No WIN32 support yet
@@ -49,33 +80,31 @@ public:
 	void UpdateValueEasy(int qType, const std::string& devId, const std::string& devName, const std::string& devValue, int level );
 	
 	// Sonos UPnP AV specific public methods/actions
-	bool SonosActionPause(GUPnPServiceProxy *av_transport);
-	bool SonosActionNext(GUPnPServiceProxy *av_transport);
-	bool SonosActionPrevious(GUPnPServiceProxy *av_transport);
-	bool SonosActionPlay(GUPnPServiceProxy *av_transport);
-	bool SonosActionSetURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type);
-	bool SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type);
-	bool SonosActionGetPositionInfo(GUPnPServiceProxy *av_transport, std::string& currenturi);
-	bool SonosActionGetTransportInfo(GUPnPServiceProxy *av_transport, std::string& state);
-	bool SonosActionLeaveGroup(GUPnPServiceProxy *av_transport);
+	bool SonosActionPause(RendererDeviceData *upnpdevice);
+	bool SonosActionNext(RendererDeviceData *upnpdevice);
+	bool SonosActionPrevious(RendererDeviceData *upnpdevice);
+	bool SonosActionPlay(RendererDeviceData *upnpdevice);
+	bool SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri );
+	bool SonosActionSetNextURI(RendererDeviceData *upnpdevice, const std::string& uri );
+	bool SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, std::string& currenturi);
+	bool SonosActionGetTransportInfo(RendererDeviceData *upnpdevice, std::string& state);
+	bool SonosActionLeaveGroup(RendererDeviceData *upnpdevice);
 
 	// Sonos UPnP Rendering Control specific public methods/actions
-	bool SonosActionSetVolume(DeviceSessionData *upnprenderer, int volume);
-	int  SonosActionGetVolume(DeviceSessionData *upnprenderer);
+	bool SonosActionSetVolume(RendererDeviceData *upnpdevice, int volume);
+	int  SonosActionGetVolume(RendererDeviceData *upnpdevice);
 
 	// Sonos UPnP Content Directory
-	bool SonosActionSaveQueue(DeviceSessionData *upnprenderer);
-	bool SonosActionLoadQueue(DeviceSessionData *upnprenderer, std::string& sURL);
+	bool SonosActionSaveQueue(RendererDeviceData *upnpdevice);
+	bool SonosActionLoadQueue(ServerDeviceData *upnpdevice, std::string& sURL);
 
 	// Sonos other UPnP methods
-	bool SonosGetRenderer(const std::string& deviceID, DeviceSessionData **upnprenderer);
-	bool SonosGetServiceAVTransport(DeviceSessionData *upnprenderer, GUPnPServiceProxy **av_transport);
-	bool SonosGetServiceRenderingControl(DeviceSessionData *upnprenderer, GUPnPServiceProxy **rendering_control);
-	bool SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name );
+	bool SonosGetRenderer(const std::string& deviceID, RendererDeviceData **upnpdevice);
+	bool SonosGetDeviceData(RendererDeviceData *upnpdevice, std::string& brand, std::string& model, std::string& name );
 
 	// Sonos non-UPnP
 	bool SonosActionSay(const std::string& tts, std::string& url, int type);
-	bool SonosActionGetPlay1Temperature(DeviceSessionData *upnprenderer, std::string& temperature);
+	bool SonosActionGetPlay1Temperature(RendererDeviceData *upnpdevice, std::string& temperature);
 
 private:
 	bool								m_bEnabled;
@@ -89,16 +118,16 @@ private:
 	bool StartHardware();
 	bool StopHardware();
 	void Do_Work();	
+    void SonosInit(void);
 
 	// Sonos specific private methods
-#ifdef WIN32
-// Sorry No WIN32 support yet
+#if defined WIN32
+	// Sorry No WIN32 support yet
+
 #elif defined __linux__
 	// GUPnP internal state
 	GUPnPContext *context;
-	GUPnPControlPoint *cp;
-
-    void SonosInit(void);
+	GUPnPControlPoint *cpmr, *cpms;
 #endif
 };
 

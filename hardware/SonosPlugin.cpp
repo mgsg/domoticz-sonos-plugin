@@ -54,9 +54,7 @@
 /*| v0.4 TTS device for Sonos speakers using Google Traslate. Presets.         |*/
 /*| v0.5 Play/Pause working on XBMC - possibly on other UPnP devices too       |*/
 /*+----------------------------------------------------------------------------+*/
-
 #include "stdafx.h"
-#include "SonosPlugin.h"
 #include "../main/Helper.h"
 #include "../main/Logger.h"
 #include "hardwaretypes.h"
@@ -76,84 +74,81 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/unordered_map.hpp>
 
-// #define _DEBUG							true
+// Conditional compiling
+//  #define _DEBUG							true
 //  #define PLAY1_GET_TEMPERATURE		true
 #define CREATE_TTS_NON_SONOS			true
 #define _DEBUG_CHANGE					true
 
-// TBC to user variables / configuration
-#define PRESET_LEVEL				5
+#include "SonosPlugin.h"
 
-#define STATE_STOPPED				0
-#define STATE_PLAYING				1
-#define STATE_TRANSITIONING			2
-#define STATE_PAUSED				3
-#define STATE_NO_MEDIA_PRESENT		4
+// UPnP constants
+#define UPNP_STATE_STOPPED				0
+#define UPNP_STATE_PLAYING				1
+#define UPNP_STATE_TRANSITIONING		2
+#define UPNP_STATE_PAUSED				3
+#define UPNP_STATE_NO_MEDIA_PRESENT		4
 
-// All the Domoticz subdevices for a Sonos "compound device"
-#define UNIT_Sonos_PlayPause		0
-#define UNIT_Sonos_TempPlay1		1
-#define UNIT_Sonos_Say				2
-#define UNIT_Sonos_Preset1			3
-#define UNIT_Sonos_Preset2			4
+#define UPNP_MEDIA_RENDERER				"urn:schemas-upnp-org:device:MediaRenderer:1"
+#define UPNP_MEDIA_SERVER				"urn:schemas-upnp-org:device:MediaServer:1"
+#define UPNP_AV_TRANSPORT				"urn:schemas-upnp-org:service:AVTransport"
+#define UPNP_RENDERING_CONTROL			"urn:schemas-upnp-org:service:RenderingControl:1"
+#define UPNP_CONTENT_DIRECTORY			"urn:schemas-upnp-org:service:ContentDirectory:1"
+#define UPNP_ALL						"ssdp:all"
 
-#define sonos_sPause				0		// light2_sOn
-#define sonos_sPlay					1		// light2_sOff
-#define sonos_sSetLevel				2		// light2_sSetLevel
-#define sonos_sSay					6
-#define sonos_sPreset1				7
-#define sonos_sPreset2				8
+#define UPNP_NULL						0
+#define UPNP_SONOS						1
+#define UPNP_PLAY1						2
+#define UPNP_XBMC						3
+#define UPNP_OTHERS						9
 
-#define USERVAR_TTS					"sonos-tts"
-#define USERVAR_PRESET1				"sonos-preset-1"
-#define USERVAR_PRESET2				"sonos-preset-2"
+// Sonos constants
+#define SONOS_SAVED_QUEUE_NAME			"SQ:24"
+#define SONOS_PROTOCOL_NONE 			0
+#define SONOS_PROTOCOL_HTTP 			1
+#define SONOS_PROTOCOL_FILE				2
+#define SONOS_PROTOCOL_LINEIN			3
+#define SONOS_PROTOCOL_RADIO			4
+#define SONOS_PROTOCOL_QUEUE			5
+
+// Domoticz constants
+#define sonos_sPause					0		// light2_sOn
+#define sonos_sPlay						1		// light2_sOff
+#define sonos_sSetLevel					2		// light2_sSetLevel
+#define sonos_sSay						6
+#define sonos_sPreset1					7
+#define sonos_sPreset2					8
+
+// Domoticz user variables
+#define PRESET_LEVEL					5
+
+#define USERVAR_TTS						"sonos-tts"
+#define USERVAR_PRESET1					"sonos-preset-1"
+#define USERVAR_PRESET2					"sonos-preset-2"
+
+// Domoticz subdevices for a Sonos "compound device"
+#define UNIT_Sonos_PlayPause			0
+#define UNIT_Sonos_TempPlay1			1
+#define UNIT_Sonos_Say					2
+#define UNIT_Sonos_Preset1				3
+#define UNIT_Sonos_Preset2				4
+
+#define RUN_TIME						19
 
 // Domoticz www folder
 extern std::string szWWWFolder;
 extern MainWorker m_mainworker;			// in Domoticz.cpp - to get www port
 
-#ifdef WIN32
+#if defined WIN32
 #elif defined __linux__
 
 /*+----------------------------------------------------------------------------+*/
 /*| GUPnP Stuff                                                                |*/
 /*+----------------------------------------------------------------------------+*/
-#define UPNP_MEDIA_RENDERER			"urn:schemas-upnp-org:device:MediaRenderer:1"
-#define UPNP_AV_TRANSPORT			"urn:schemas-upnp-org:service:AVTransport"
-#define UPNP_RENDERING_CONTROL		"urn:schemas-upnp-org:service:RenderingControl:1"
-#define UPNP_CONTENT_DIRECTORY		"urn:schemas-upnp-org:service:ContentDirectory:1"
-
-#define RUN_TIME					19
-
-#define UPNP_NULL					0
-#define UPNP_SONOS					1
-#define UPNP_PLAY1					2
-#define UPNP_XBMC					3
-#define UPNP_OTHERS					9
-
 static GMainLoop					*main_loop;
 static GUPnPLastChangeParser		*lc_parser;
 
-/* Store / maps for UPnP devices */
-// static GHashTable					*renderers;		// Store media renderers - key udn
-// static GHashTable					*ipstore;		// Store media renderers - key ip
-typedef boost::unordered_map<std::string,GUPnPDeviceProxy*>			RenderersMap;
-typedef boost::unordered_map<std::string,GUPnPDeviceProxy*>::iterator	IterRend;
-typedef boost::unordered_map<std::string,DeviceSessionData*>			IPStoreMap;
-typedef boost::unordered_map<std::string,DeviceSessionData*>::iterator	IterIP;
-
-static RenderersMap					renderers;		// Store media renderers - key udn
-static IPStoreMap					ipstore;		// Store media renderers - key ip
-
-std::string							m_host_ip;
-std::string							m_ttsLanguage("EN");	// "ES";
-
 /* Callbacks need to be static "C" functions; didn't discover a way to migrate */
-/* them to C++ */
-static CSonosPlugin					*thisInstance;	// Dirty trick-access CSonosPlugin 
-													// methods from "C" callbacks
-static int							hwIdStatic;		// idem
-
 static gboolean callbackTimeout(void *data);
 static void callbackDeviceDiscovered(GUPnPControlPoint *cp, 
 	GUPnPDeviceProxy *proxy);
@@ -161,15 +156,39 @@ static void callbackLastChange( GUPnPServiceProxy *av_transport,
 	const char *variable_name, GValue *value, gpointer user_data);
 static void callbackDeviceUnavailable(GUPnPControlPoint *cp, 
 	GUPnPDeviceProxy *renderer);
-static void callbackGetPlay1Temperature(DeviceSessionData *upnprenderer);
+static void callbackGetPlay1Temperature(RendererDeviceData *upnpdevice);
 static void callbackGetTrackInfo(GUPnPDIDLLiteParser *parser, 
 	GUPnPDIDLLiteObject *object, gpointer renderer);
+#endif
+
+/* Store / maps for UPnP devices */
+typedef boost::unordered_map<std::string,std::string>					MediaDevicesMap;
+typedef boost::unordered_map<std::string,RendererDeviceData*>			RenderersMap;
+typedef boost::unordered_map<std::string,ServerDeviceData*>				ServersMap;
+
+typedef boost::unordered_map<std::string,std::string>::iterator			IteratorMediaDevice;
+typedef boost::unordered_map<std::string,RendererDeviceData*>::iterator	IteratorRenderer;
+typedef boost::unordered_map<std::string,ServerDeviceData*>::iterator	IteratorServer;
+
+static MediaDevicesMap				mediadevicesmap;	// Store MediaRenderers + MediaServers - key=udn data=long ip
+static RenderersMap					renderersmap;	// Store MediaRenderers - key=long ip data=RendererDeviceData
+static ServersMap					serversmap;		// Store MediaServers - key=long ip data=RendererDeviceData
+
+std::string							m_host_ip;
+std::string							m_ttsLanguage("EN");	// "ES";
+
+
+/* them to C++ */
+static CSonosPlugin					*thisInstance;	// Dirty trick-access CSonosPlugin 
+													// methods from "C" callbacks
+static int							hwIdStatic;		// idem
 
 /* Utilities */
 unsigned long helperGetIpFromLocation(const char *szLocation, char *szIP );
 std::string helperCreateHash(std::string a);
 std::string helperGetUserVariable(const std::string &name);
-#endif
+bool helperListMaps(void);
+bool helperChangeProtocol(std::string &url, int type);
 
 /*+----------------------------------------------------------------------------+*/
 /*| CSonosPlugin class.                                                        |*/
@@ -291,19 +310,12 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 		std::stringstream ss;
 		ss << std::uppercase << std::setfill('0') << std::setw(8) << std::hex <<  ulIpAddress;
 		std::string deviceID(ss.str());
-//		char szDeviceID[25];
-//		sprintf(szDeviceID, "%8X", ulIpAddress);
-//		std::string deviceID(szDeviceID);
 
-		/* Get renderer and av_transport from IP */
-		DeviceSessionData *upnprenderer;
-		GUPnPServiceProxy *av_transport;
-		if (SonosGetRenderer(deviceID, &upnprenderer)) {
-			SonosGetServiceAVTransport(upnprenderer, &av_transport);
-		} else {
-			return;
-		}
-		
+		/* Look up the renderer device data from IP */
+	    RendererDeviceData *upnpdevice;
+		IteratorRenderer it = renderersmap.find(deviceID);
+		upnpdevice = (RendererDeviceData *)it->second;
+
 		int unit = (pCmd->LIGHTING2.unitcode);
 		int cmnd = (pCmd->LIGHTING2.cmnd);
 		int level = (pCmd->LIGHTING2.level);
@@ -311,33 +323,33 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 		if (pCmd->LIGHTING2.unitcode == UNIT_Sonos_PlayPause ) {
 			if (pCmd->LIGHTING2.cmnd==sonos_sPause) {
 				// STOP
-				SonosActionPause( av_transport );
-				upnprenderer->level	= SonosActionGetVolume( upnprenderer  );
-				upnprenderer->prev_state = STATE_STOPPED;
+				SonosActionPause( upnpdevice );
+				upnpdevice->level	= SonosActionGetVolume( upnpdevice  );
+				upnpdevice->prev_state = UPNP_STATE_STOPPED;
 #ifdef _DEBUG
 				_log.Log(LOG_NORM,"(Sonos) WriteToHardware Pause devid %8X cmnd %d unit %d level %d", 
 					ulIpAddress, cmnd, unit, level);
 #endif
 			} else if (pCmd->LIGHTING2.cmnd==sonos_sSetLevel) {
-				SonosActionSetVolume( upnprenderer, level );
+				SonosActionSetVolume( upnpdevice, level );
 #ifdef _DEBUG
 				_log.Log(LOG_NORM,"(Sonos) WriteToHardware %s Volume from %d to %d", 
-					upnprenderer->name.c_str(), upnprenderer->level, level);
+					upnpdevice->name.c_str(), upnpdevice->level, level);
 #endif			
-				upnprenderer->level	= level;
+				upnpdevice->level	= level;
 			} else if (pCmd->LIGHTING2.cmnd==sonos_sPlay) {
 				// PLAY
-				if (upnprenderer->prev_state == STATE_STOPPED) {
-					SonosActionSetVolume( upnprenderer, upnprenderer->level );
+				if (upnpdevice->prev_state == UPNP_STATE_STOPPED) {
+					SonosActionSetVolume( upnpdevice, upnpdevice->level );
 				}
-				upnprenderer->prev_state = STATE_PLAYING;
+				upnpdevice->prev_state = UPNP_STATE_PLAYING;
 
 				// Check if there's something to play
 				std::string currenturi;
-				SonosActionGetPositionInfo(av_transport, currenturi);
+				SonosActionGetPositionInfo(upnpdevice, currenturi);
 				if (currenturi != "") {
 					// Play!
-					SonosActionPlay( av_transport );
+					SonosActionPlay( upnpdevice );
 #ifdef _DEBUG
 					_log.Log(LOG_NORM,"(Sonos) WriteToHardware Play devid %8X cmnd %d unit %d level %d", 
 						ulIpAddress, cmnd, unit, level);
@@ -362,7 +374,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 				sURL = "http://192.168.1.63:8888/media/tts-text.mp3";
 				bool ret;
 
-				ret = SonosActionSay( text, sURL, upnprenderer->type );
+				ret = SonosActionSay( text, sURL, upnpdevice->type );
 				ret = true;
 				if (ret) {
 					_log.Log(LOG_NORM,"(Sonos) Say \'%s\' saved to \'%s\'", text.c_str(), sURL.c_str());
@@ -371,11 +383,15 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 				std::string preset_station;
 				if (pCmd->LIGHTING2.unitcode==UNIT_Sonos_Preset1)
 					preset_station = std::string(USERVAR_PRESET1);
-				else
+				else {
 					preset_station = std::string(USERVAR_PRESET2);
+#ifdef _DEBUG
+					helperListMaps();
+#endif
+				}
 
 				sURL = helperGetUserVariable(preset_station);
-				if (upnprenderer->type == UPNP_SONOS) {
+				if (upnpdevice->type == UPNP_SONOS) {
 					if (sURL == "")
 						sURL = "x-rincon-mp3radio://radioclasica.rtve.stream.flumotion.com/rtve/radioclasica.mp3.m3u";
 				} else {
@@ -383,6 +399,8 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 						sURL = "http://radioclasica.rtve.stream.flumotion.com/rtve/radioclasica.mp3.m3u";
 				}
 			}
+
+			helperChangeProtocol(sURL, upnpdevice->type);
 
 			// Save state - before you "Unlink" a ZP, you have to figure out if it's 
 			//   a) linked to another ZP
@@ -392,25 +410,33 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 			// Depending on which (a through d) it is doing, when it's time to "restore" 
 			// that ZP back to its original state, you have to take very different steps.
 
-//			if (upnprenderer->type == UPNP_SONOS) {
-//				/* Save current uri and state */
-//				std::string currenturi;
-//				std::string state;
-//				SonosActionGetPositionInfo(av_transport, currenturi);
-//				SonosActionGetTransportInfo(av_transport, state);
-//				SonosActionSetNextURI(av_transport, currenturi, bMetadata);
-//			}
+			if (upnpdevice->type == UPNP_SONOS) {
+				/* Save current uri and state */
+				std::string state;
+				SonosActionGetTransportInfo(upnpdevice, state);
 
-			// d) Save Queue / State
-			SonosActionSaveQueue(upnprenderer);
-						
-			// Set current and next URI and play - UNLINK!
-			SonosActionSetURI(av_transport, sURL, upnprenderer->type);
+				std::string currenturi;
+				SonosActionGetPositionInfo(upnpdevice, currenturi);
 
-			SonosActionPlay(av_transport);
+				// d) Save Queue / State
+				SonosActionSaveQueue(upnpdevice);
 
-			std::string sURLQueue;
-			SonosActionLoadQueue(upnprenderer, sURLQueue);
+				// Set current and next URI and play - UNLINK!
+				SonosActionSetURI(upnpdevice, sURL );
+
+				SonosActionPlay(upnpdevice);
+
+				// Restore session
+				upnpdevice->restore_state = true;
+
+
+			} else {
+
+				// Set current and next URI and play - UNLINK!
+				SonosActionSetURI(upnpdevice, sURL );
+
+				SonosActionPlay(upnpdevice);
+			}
 
 #ifdef _DEBUG
 			_log.Log(LOG_NORM,"(Sonos) WriteToHardware Preset devid %8X cmnd %d unit %d level %d", 
@@ -482,11 +508,10 @@ void CSonosPlugin::UpdateValueEasy(int qType,
 		return;
 	}
 
-//	sscanf(devId.c_str(), "%8X", &ulIpAddress);
 	std::istringstream iss(devId);
 	iss >> std::hex >> ulIpAddress;
 #ifdef _DEBUG
-	_log.Log(LOG_NORM,"(Sonos) UpdateValueEasy: devId %s LIP %8X Value %s", devId.c_str(), ulIpAddress, devValue.c_str());
+//	_log.Log(LOG_NORM,"(Sonos) Update1 devId %s LIP %8X Value %s", devId.c_str(), ulIpAddress, devValue.c_str());
 #endif
 	szQuery << "SELECT ID, Name FROM DeviceStatus WHERE (DeviceID=='" << devId << "' AND Unit=" << dunit << ")";
 	result=m_sql.query(szQuery.str());
@@ -694,7 +719,7 @@ std::string helperGetUserVariable(const std::string &name)
 }
 
 
-#ifdef WIN32
+#if defined WIN32
 	//sorry Win32 not supported for now
 #elif defined __linux__
     /*+------------------------------------------------------------------------+*/
@@ -713,8 +738,7 @@ std::string helperGetUserVariable(const std::string &name)
 #endif
 
 		// Fetch Temperatures
-//		g_hash_table_foreach(ipstore, (GHFunc)callbackGetPlay1Temperature, NULL);
-		for(IterIP it = ipstore.begin(); it != ipstore.end(); ++it)
+		for(IteratorRenderer it = renderersmap.begin(); it != renderersmap.end(); ++it)
 			callbackGetPlay1Temperature(it->second);
 
 		mytime(&thisInstance->m_LastHeartbeat);
@@ -724,13 +748,83 @@ std::string helperGetUserVariable(const std::string &name)
         return true;
     }
 
+	/* 
+	 * Change protocols.
+     */
+	bool helperChangeProtocol(std::string &url, int type)
+	{
+		// If protocol == x-rincon...: and type not sonos, then change to http:
+		return true;
+	}
+
+	/* 
+	 * Callback method that executes every time the timeout expires - return true - executes again and again
+     */
+    bool helperListMaps(void)
+    { 
+		int i=0;
+
+		// Fetch Renderers
+		for(IteratorRenderer itr = renderersmap.begin(); itr != renderersmap.end(); ++itr) {
+			std::string key = (std::string)itr->first;
+			RendererDeviceData *upnprenderer = (RendererDeviceData *)itr->second;
+			GUPnPDeviceInfo* info  = GUPNP_DEVICE_INFO(upnprenderer->renderer);
+ 			_log.Log(LOG_NORM,"(Sonos) Renderer %i id=%s Name=%s", ++i, key.c_str(), upnprenderer->name.c_str());
+
+			// List services available
+			GList *services, *s;
+	 		int j;
+	 		services = gupnp_device_info_list_service_types (info);
+	 		for (s = services, j = 0; s; s = s->next, j++) {
+	 			char *type = (char *)s->data;	 	
+	 			_log.Log(LOG_STATUS,"(Sonos) Renderer %i service [%d]: %s", i, j, type);
+
+	 			g_free (type);
+	 		}
+	 		g_list_free (services);
+		}
+
+		i=0;
+
+		// Fetch Servers
+		for(IteratorServer its = serversmap.begin(); its != serversmap.end(); ++its) {
+			std::string key = (std::string)its->first;
+			ServerDeviceData *upnpserver = (ServerDeviceData *)its->second;
+			GUPnPDeviceInfo* info  = GUPNP_DEVICE_INFO(upnpserver->server);
+ 			_log.Log(LOG_NORM,"(Sonos) Server %i id=%s Name=%s", ++i, key.c_str(), upnpserver->name.c_str());
+
+			// List services available
+			GList *services, *s;
+	 		int j;
+	 		services = gupnp_device_info_list_service_types (info);
+	 		for (s = services, j = 0; s; s = s->next, j++) {
+	 			char *type = (char *)s->data;	 	
+	 			_log.Log(LOG_STATUS,"(Sonos) Server %i service [%d]: %s", i, j, type);
+
+	 			g_free (type);
+	 		}
+	 		g_list_free (services);
+		}
+
+		i=0;
+
+		// Fetch MediaDevices
+		for(IteratorMediaDevice itmd = mediadevicesmap.begin(); itmd != mediadevicesmap.end(); ++itmd) {
+			std::string key = (std::string)itmd->first;
+			std::string sip = (std::string)itmd->second;
+ 			_log.Log(LOG_NORM,"(Sonos) MediaDevice %i udn=%s id=%s", ++i, key.c_str(), sip.c_str());
+		}
+
+        return true;
+    }
+
 	/*
 	 * Utility function to get play1 temperature
 	 */
-	static void callbackGetPlay1Temperature(DeviceSessionData *upnprenderer) { 	
+	static void callbackGetPlay1Temperature(RendererDeviceData *upnpdevice) { 	
 	   std::string temperature;
 
-	   if (upnprenderer->type != UPNP_PLAY1) {
+	   if (upnpdevice->type != UPNP_PLAY1) {
 			return;
 	   }
 
@@ -738,13 +832,13 @@ std::string helperGetUserVariable(const std::string &name)
 		_log.Log(LOG_STATUS,"(Sonos) callbackGetPlay1Temperature ->");
 #endif
 
-	   if (thisInstance->SonosActionGetPlay1Temperature(upnprenderer, temperature) != true) {
-			_log.Log(LOG_ERROR,"(Sonos) Get Play:1 devID %s", upnprenderer->name.c_str() );	   
-			thisInstance->UpdateValueEasy(UNIT_Sonos_TempPlay1, upnprenderer->id, NULL, temperature, -1);
+	   if (thisInstance->SonosActionGetPlay1Temperature(upnpdevice, temperature) != true) {
+			_log.Log(LOG_ERROR,"(Sonos) Get Play:1 devID %s", upnpdevice->name.c_str() );	   
+			thisInstance->UpdateValueEasy(UNIT_Sonos_TempPlay1, upnpdevice->id, NULL, temperature, -1);
 	   }
 
 #ifdef _DEBUG
-	   _log.Log(LOG_NORM,"(Sonos) Get Play:1 devID %s Temp %s", upnprenderer->name.c_str(), temperature.c_str());	   
+	   _log.Log(LOG_NORM,"(Sonos) Get Play:1 devID %s Temp %s", upnpdevice->name.c_str(), temperature.c_str());	   
 #endif
 	}
 
@@ -798,8 +892,8 @@ std::string helperGetUserVariable(const std::string &name)
 		gpointer           user_data)
 	{
 		const char					*last_change_xml;
-		char						*state_name;
-		char						*metadata;
+		char						*state_name = NULL;
+		char						*metadata = NULL;
 		char						*duration;
 		GError						*error;
 		const char					*udn;
@@ -807,9 +901,10 @@ std::string helperGetUserVariable(const std::string &name)
 		GUPnPDIDLLiteParser			*parser;
 		unsigned long				longIP;
 		bool						success;
+		int							new_state;
 
 #ifdef _DEBUG_CHANGE
-//		_log.Log(LOG_NORM,"(Sonos) Change [%s]", variable_name);
+//		_log.Log(LOG_NORM,"(Sonos) Change1 [%s]", variable_name);
 #endif
 		// The data returned is an XML document describing the transport state
 		last_change_xml = g_value_get_string (value);
@@ -825,78 +920,88 @@ std::string helperGetUserVariable(const std::string &name)
 				"TransportState", G_TYPE_STRING, &state_name,
 				"CurrentTrackMetaData", G_TYPE_STRING, &metadata,
 				NULL);
-		if (success) 
-		{
-			std::string brand, model, name;
-			bool isFirstTime = false;
+		if (!success) {
+			if (error) {
+				_log.Log(LOG_ERROR, "(Sonos) Change2 error %d %s", error, error->message);
+				g_error_free (error);
+			}
 
-			/* Look up the UDN in our hashtable to get the renderer */
-			udn = gupnp_service_info_get_udn(GUPNP_SERVICE_INFO (av_transport));
-//			renderer = (GUPnPDeviceProxy*)g_hash_table_lookup(renderers, udn);
-			IterRend itrnd = renderers.find(std::string(udn));
-			renderer = (GUPnPDeviceProxy*)itrnd->second;
+			// Free resources
+			if (state_name != NULL) 
+				g_free (state_name);
+			if (metadata != NULL) 
+				g_free (metadata);		
+			if (parser != NULL) 
+				g_object_unref (parser);
+			return;
+		}
 
-			/* Get IP */
-			char szIP[25];
-			longIP = helperGetIpFromLocation(gupnp_device_info_get_location (GUPNP_DEVICE_INFO(renderer)), szIP);
+		std::string brand, model, name;
+		bool isFirstTime = false;
 
-			std::stringstream ss;
-			ss << std::uppercase << std::setfill('0') << std::setw(8) << std::hex <<  longIP;
-			std::string deviceID(ss.str());
-//			char szDeviceID[25];
-//			sprintf(szDeviceID, "%8X", longIP);
-//			std::string deviceID(szDeviceID);
+		/* Look up the UDN in our hashtable to get the renderer */
+		udn = gupnp_service_info_get_udn(GUPNP_SERVICE_INFO (av_transport));
+		IteratorMediaDevice itrnd = mediadevicesmap.find(std::string(udn));
+		std::string deviceID = (std::string)itrnd->second;
 
-			/* Possible states: STOPPED PLAYING TRANSITIONING PAUSED NO_MEDIA_PRESENT */
+		/* Look up the renderer device data from IP */
+	    RendererDeviceData *upnpdevice;
+		IteratorRenderer it = renderersmap.find(deviceID);
+		upnpdevice = (RendererDeviceData *)it->second;
 
-			/* XBMC results in a (null) state_name sometimes!!! */
-			bool break_change = false;
+		/* Only first time - Get extra device information to store in device list */
+		if (upnpdevice->type == UPNP_NULL) {
+			thisInstance->SonosGetDeviceData(upnpdevice, brand, model, name);
+			_log.Log(LOG_NORM,"(Sonos) %s(%s) [%s] [%s] [%s] [%s] [%s]", 
+				state_name, upnpdevice->name.c_str(), deviceID.c_str(), udn, brand.c_str(), model.c_str(), name.c_str());
+			isFirstTime = true;
+		}
 
-			if (state_name == NULL) {
+		/* Possible states: STOPPED PLAYING PAUSED TRANSITIONING NO_MEDIA_PRESENT */
+
+		/* XBMC/Kodi results in a (null) state_name sometimes!!! */
+		bool break_change = false;
+		if (state_name == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) (NULL State) (%s)!!", upnpdevice->name.c_str());
+			new_state = UPNP_STATE_PLAYING;
+//			break_change = true;
+		} else {
+			if (strcmp(state_name, "TRANSITIONING") == 0) {
+				new_state = UPNP_STATE_TRANSITIONING;
 #ifdef _DEBUG_CHANGE
-				_log.Log(LOG_ERROR,"(Sonos) (NULL State) (%s)!!", deviceID.c_str());
+				if (new_state != upnpdevice->prev_state)
+					_log.Log(LOG_NORM,"(Sonos) %s(%s) ignored", state_name, upnpdevice->name.c_str() );
 #endif
 				break_change = true;
-			} else {
-				if (strcmp(state_name, "TRANSITIONING") == 0) {
+			} else if (strcmp(state_name, "NO_MEDIA_PRESENT") == 0) {
+				new_state = UPNP_STATE_NO_MEDIA_PRESENT;
 #ifdef _DEBUG_CHANGE
-					_log.Log(LOG_NORM,"(Sonos) %s(%s) ignored", state_name, deviceID.c_str() );
+				_log.Log(LOG_NORM,"(Sonos) %s(%s) ignored", state_name, upnpdevice->name.c_str() );
 #endif
-					break_change = true;
-				} 
+				break_change = true;
+			} else if (strcmp(state_name, "STOPPED") == 0) {
+				new_state = UPNP_STATE_STOPPED;
+			} else if (strcmp(state_name, "PLAYING") == 0) {
+				new_state = UPNP_STATE_PLAYING;			
+			} else if (strcmp(state_name, "PAUSED") == 0) {
+				new_state = UPNP_STATE_PAUSED;
 			}
+		}
 
-			/* Return */
-			if (break_change) {
-				// Free resources
-				if (state_name != NULL) 
-					g_free (state_name);
-				if (metadata != NULL) 
-					g_free (metadata);		
-				if (parser != NULL) 
-					g_object_unref (parser);
-				return;
-			}
+		/* Return */
+		if (break_change) {
+			// Free resources
+			if (state_name != NULL) 
+				g_free (state_name);
+			if (metadata != NULL) 
+				g_free (metadata);		
+			if (parser != NULL) 
+				g_object_unref (parser);
+			return;
+		}
 
-			/* Look up the renderer device data from IP */
-	        DeviceSessionData *upnprenderer;
-//            upnprenderer = (DeviceSessionData *)g_hash_table_lookup(ipstore, deviceID.c_str());
-			IterIP it = ipstore.find(deviceID);
-			upnprenderer = (DeviceSessionData *)it->second;
-
-			/* Only first time - Get extra device information to store in device list */
-			if (upnprenderer->type == UPNP_NULL) {
-				thisInstance->SonosGetDeviceData((DeviceSessionData *)upnprenderer, brand, model, name);
-				_log.Log(LOG_NORM,"(Sonos) %s(%s) [%s] [%s] [%s] [%s] [%s]", 
-					state_name, upnprenderer->name.c_str(), deviceID.c_str(), udn, brand.c_str(), model.c_str(), name.c_str());
-				isFirstTime = true;
-			} else {
-#ifdef _DEBUG_CHANGE
-				_log.Log(LOG_NORM,"(Sonos) %s(%s) [%s] [%s]", state_name, upnprenderer->name.c_str(), deviceID.c_str(), udn );
-#endif
-			}
-
-			/* Get current track info from metadata */
+		/* Get current track info from metadata - Only when starting to play or playing something different */
+		if (new_state == UPNP_STATE_PLAYING) {
 			if (metadata != NULL) {
 				int meta_length = strlen(metadata);
 				if (meta_length > 5) {
@@ -904,68 +1009,83 @@ std::string helperGetUserVariable(const std::string &name)
 
 					lc_error = NULL;
 #ifdef _DEBUG
-					_log.Log(LOG_NORM,"(Sonos) Change  - Metadata: %d", meta_length);
+					//				_log.Log(LOG_NORM,"(Sonos) Change7 Metadata len: %d", meta_length);
 #endif
-					g_signal_connect (parser, "object-available", G_CALLBACK (callbackGetTrackInfo), (gpointer) upnprenderer);
+					g_signal_connect (parser, "object-available", G_CALLBACK (callbackGetTrackInfo), (gpointer) upnpdevice);
 					gupnp_didl_lite_parser_parse_didl (parser, metadata, &lc_error);
 					if (lc_error) {
-						_log.Log(LOG_ERROR,"(Sonos) Change - Parse DIDL %s\n", lc_error->message);
+						_log.Log(LOG_ERROR,"(Sonos) Change7 Parse DIDL %s\n", lc_error->message);
 						g_error_free (lc_error);
 					}
-				} else {
-					_log.Log(LOG_ERROR,"(Sonos) Change - Metadata error");
+				} else if (meta_length != 0) {
+					_log.Log(LOG_NORM,"(Sonos) Change8 Metadata too short %d \'%s\' %x", meta_length, metadata, metadata[0]);
 				}
 			} else {
-				_log.Log(LOG_NORM,"(Sonos) Change - No metadata");
+				_log.Log(LOG_NORM,"(Sonos) PLAYING but no metadata");
 			}
 
 			/* GetPositionInfo */
-			std::string state;
-			thisInstance->SonosActionGetPositionInfo(av_transport, state);
+			std::string currenturi;
+			thisInstance->SonosActionGetPositionInfo(upnpdevice, currenturi);
 
 #ifdef _DEBUG_CHANGE
-			_log.Log(LOG_NORM,"(Sonos) Change GetPositionInfo %s State=%s", upnprenderer->name.c_str(), state.c_str() );
-#endif
+			_log.Log(LOG_NORM,"(Sonos) Change10 GetPositionInfo %s URI=%s", upnpdevice->name.c_str(), currenturi.c_str() );
+#endif		
+		}
 				
-			/* Get volume level */
-			int level = thisInstance->SonosActionGetVolume(upnprenderer);
+		/* Get volume level */
+		int level = thisInstance->SonosActionGetVolume(upnpdevice);
 
-			/* The first time, add a Play/Pause/Volume device for each Sonos speaker */
-			/* Later, adjust state and volume level                                  */
-			if(strcmp(state_name, "PLAYING")==0)
-				thisInstance->UpdateValueEasy(UNIT_Sonos_PlayPause, deviceID, name, "1", level);
-			else
-				thisInstance->UpdateValueEasy(UNIT_Sonos_PlayPause, deviceID, name, "0", level);
+		/* The first time, add a Play/Pause/Volume device for each Sonos speaker */
+		/* Later, adjust state and volume level                                  */
+		if (new_state == UPNP_STATE_PLAYING)
+			thisInstance->UpdateValueEasy(UNIT_Sonos_PlayPause, deviceID, name, "1", level);
+		else
+			thisInstance->UpdateValueEasy(UNIT_Sonos_PlayPause, deviceID, name, "0", level);
 
-			/* Only first time - create the extra domoticz devices */
-			if (isFirstTime) {
-				/* Add a Say pushbutton for each Sonos speaker */
-//				if ((upnprenderer->type == UPNP_SONOS) || (upnprenderer->type == UPNP_PLAY1))
-					thisInstance->UpdateValueEasy(UNIT_Sonos_Say, deviceID, name, "0", -1);
+		/* Only first time - create the extra domoticz devices - nothing to change afterwards */
+		/* @@@Future Change ONLY NEEDED IF DEVICE IS NOT ALREADY CREATED IN DATABASE!! */
+		if (isFirstTime) {
+			/* Add a Say pushbutton for each Sonos speaker */
+//				if ((upnpdevice->type == UPNP_SONOS) || (upnpdevice->type == UPNP_PLAY1))
+				thisInstance->UpdateValueEasy(UNIT_Sonos_Say, deviceID, name, "0", -1);
 
-				/* Add Presets pushbuttons for each Sonos speaker */
-				thisInstance->UpdateValueEasy(UNIT_Sonos_Preset1, deviceID, name, "0", -1);
-				thisInstance->UpdateValueEasy(UNIT_Sonos_Preset2, deviceID, name, "0", -1);
+			/* Add Presets pushbuttons for each Sonos speaker */
+			thisInstance->UpdateValueEasy(UNIT_Sonos_Preset1, deviceID, name, "0", -1);
+			thisInstance->UpdateValueEasy(UNIT_Sonos_Preset2, deviceID, name, "0", -1);
 
-				/* Add a temperature sensor for each Play:1 */
-				if (upnprenderer->type == UPNP_PLAY1) {
-					std::string temperature;
+			/* Add a temperature sensor for each Play:1 */
+			if (upnpdevice->type == UPNP_PLAY1) {
+				std::string temperature;
 
-					// Create/update the Temp sensor
-					if (thisInstance->SonosActionGetPlay1Temperature(upnprenderer, temperature) != false)	
-						thisInstance->UpdateValueEasy(UNIT_Sonos_TempPlay1, deviceID, name, temperature, -1);
-				}
-			}
-		} else {
-			if (error) {
-				_log.Log(LOG_ERROR, "(Sonos) Change error %s", error->message);
-				g_error_free (error);
+				// Create/update the Temp sensor
+				if (thisInstance->SonosActionGetPlay1Temperature(upnpdevice, temperature) != false)	
+					thisInstance->UpdateValueEasy(UNIT_Sonos_TempPlay1, deviceID, name, temperature, -1);
 			}
 		}
 
+		/* If STOPPED and restore state pending*/
+		if (new_state == UPNP_STATE_STOPPED) {
+			if (upnpdevice->restore_state) {
+				ServerDeviceData *upnpserverdevice = NULL;
+				IteratorServer its = serversmap.find(upnpdevice->id);
+				if (its != serversmap.end()) {
+					upnpserverdevice = (ServerDeviceData *)its->second;
+
+					std::string sURLQueue;
+					thisInstance->SonosActionLoadQueue(upnpserverdevice, sURLQueue);
+					_log.Log(LOG_NORM,"(Sonos) Change11 RestoreState Queue %s", upnpdevice->name.c_str());
+				}
+				upnpdevice->restore_state = false;
+			}
+		}
+
+		// Store previous state
+		upnpdevice->prev_state = new_state;
+
 		// Free resources
 #ifdef _DEBUG_CHANGE
-//		_log.Log(LOG_NORM, "(Sonos) Change end S[%x] M[%x] P[%x]", state_name, metadata, parser);
+//		_log.Log(LOG_NORM, "(Sonos) Change12 end S[%x] M[%x] P[%x]", state_name, metadata, parser);
 #endif
 		if (state_name != NULL) 
 			g_free (state_name);
@@ -976,13 +1096,32 @@ std::string helperGetUserVariable(const std::string &name)
 	}
 
 
-    /* This is our callback method to handle new devices
-     * which have been discovered. 
+    /* 
+	 * Callback method to handle new devices which have been discovered. 
      */
-    static void callbackDeviceDiscovered(GUPnPControlPoint *cp, GUPnPDeviceProxy *renderer)
+    static void callbackDeviceDiscovered(GUPnPControlPoint *cp, GUPnPDeviceProxy *deviceproxy)
     {
         GUPnPServiceProxy *av_transport;
-        GUPnPDeviceInfo* info  = GUPNP_DEVICE_INFO(renderer);
+        GUPnPDeviceInfo* info  = GUPNP_DEVICE_INFO(deviceproxy);
+		bool isRenderer = false;
+
+		/* Only allow MediaRenderers and MediaServers */
+		char *device_type = NULL;
+		device_type = (char *)gupnp_device_info_get_device_type (info);
+		if (strcmp(device_type, UPNP_MEDIA_RENDERER) == 0) 
+			isRenderer = true;
+		else if (strcmp(device_type, UPNP_MEDIA_SERVER) == 0)
+			isRenderer = false;
+		else
+			return;
+		
+		/* Get UDN */
+		std::string udn(gupnp_device_info_get_udn(info));
+
+#ifdef _DEBUG
+		_log.Log(LOG_STATUS,"(Sonos) Discovered %s Model[%s] Type[%s]", 
+			udn.c_str(), gupnp_device_info_get_model_name (info), gupnp_device_info_get_device_type (info) );
+#endif
 
 		/* Extract IP and add device ip to list of current device ips */
 		char szIP[30];
@@ -990,59 +1129,65 @@ std::string helperGetUserVariable(const std::string &name)
 		std::stringstream ss;
 		ss << std::uppercase << std::setfill('0') << std::setw(8) << std::hex <<  longIP;
 		std::string deviceID(ss.str());
-//		sprintf(szIP, "%8X", longIP);
-//		char *szDeviceID = strdup(szIP);
-
-		/* Get UDN */
-		std::string udn(gupnp_device_info_get_udn(info));
-
-#ifdef _DEBUG
-		_log.Log(LOG_STATUS,"(Sonos) Device discovered [%s] [%s]", deviceID.c_str(), udn.c_str() );
-#endif
-		
-		// List services available
-		GList *services, *s;
-	 	int i;
-	 	services = gupnp_device_info_list_service_types (info);
-	 	for (s = services, i = 0; s; s = s->next, i++) {
-	 		char *type = (char *)s->data;	 	
-	 		_log.Log(LOG_STATUS,"(Sonos) Device service [%d]: %s", i, type);
-	 		g_free (type);
-	 	}
-	 	g_list_free (services);
-
-		/* Get AVTransport service for device */
-		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(info, UPNP_AV_TRANSPORT));
 
 		/* Save all info in UPnP renderer structure */
-		DeviceSessionData *upnprenderer;
-//		upnprenderer = (DeviceSessionData *)malloc(sizeof(DeviceSessionData));
-		upnprenderer = new(DeviceSessionData);
-		upnprenderer->ip = longIP;
-		upnprenderer->type = UPNP_NULL;			// Not already identified
-		upnprenderer->prev_state = 0;
-		upnprenderer->level = 0;
-		upnprenderer->renderer = renderer;
-		upnprenderer->av_transport = av_transport;
+		/* If device already saved, retrieve it - else create a new one */
+		if (isRenderer) {
+			RendererDeviceData *upnpdevice;
 
-//		upnprenderer->id = szDeviceID;
-//      upnprenderer->udn = udn;
-//		upnprenderer->name = NULL;
-		upnprenderer->id = deviceID;
-        upnprenderer->udn = udn;
-		upnprenderer->name = "";
+			IteratorRenderer it = renderersmap.find(deviceID);
+			if (it != renderersmap.end()) {
+				upnpdevice = (RendererDeviceData *)it->second;
+				_log.Log(LOG_NORM,"(Sonos) Discovered %s duplicate renderer!", upnpdevice->name.c_str());
+			} else {
+				upnpdevice = new(RendererDeviceData);
+				upnpdevice->ip = longIP;
+				upnpdevice->type = UPNP_NULL;			// Not already identified
+				upnpdevice->prev_state = UPNP_STATE_STOPPED;
+				upnpdevice->restore_state = false;
+				upnpdevice->level = 0;
+				upnpdevice->id = deviceID;
+				upnpdevice->udn = udn;
+				upnpdevice->name = "";
 
-		/* Add device to list of current devices */
-//		g_hash_table_insert(ipstore, const_cast<char*>(upnprenderer->id), upnprenderer);
-//		g_hash_table_insert(renderers, const_cast<char*>(upnprenderer->udn), renderer);
-		ipstore.insert(IPStoreMap::value_type(std::string(upnprenderer->id), upnprenderer));
-		renderers.insert(RenderersMap::value_type(std::string(upnprenderer->udn), renderer));
-		 
-		/* Add "LastChange" to the list of states we want to be notified about and turn on event subscription */
-		gupnp_service_proxy_add_notify( av_transport,
-										"LastChange", G_TYPE_STRING, callbackLastChange,
-										NULL);
-		gupnp_service_proxy_set_subscribed (av_transport, TRUE);
+				/* Get AVTransport service for device */
+				upnpdevice->av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(info, UPNP_AV_TRANSPORT));
+				upnpdevice->renderer = deviceproxy;
+
+				/* Add device to list of current devices */
+				renderersmap.insert(RenderersMap::value_type(std::string(upnpdevice->id), upnpdevice));
+				mediadevicesmap.insert(MediaDevicesMap::value_type(std::string(upnpdevice->udn), upnpdevice->id));
+
+				/* Add "LastChange" to the list of states we want to be notified about and turn on event subscription */
+				gupnp_service_proxy_add_notify( upnpdevice->av_transport,
+											"LastChange", G_TYPE_STRING, callbackLastChange,
+											NULL);
+				gupnp_service_proxy_set_subscribed (upnpdevice->av_transport, TRUE);
+			}
+		} else {
+			ServerDeviceData *upnpdevice;
+
+			IteratorServer it = serversmap.find(deviceID);
+			if (it != serversmap.end()) {
+				upnpdevice = (ServerDeviceData *)it->second;
+				_log.Log(LOG_STATUS,"(Sonos) Discovered %s duplicate server!", upnpdevice->name.c_str());
+			} else {
+				upnpdevice = new(ServerDeviceData);
+				upnpdevice->ip = longIP;
+				upnpdevice->type = UPNP_NULL;			// Not already identified
+				upnpdevice->id = deviceID;
+				upnpdevice->udn = udn;
+				upnpdevice->name = std::string(gupnp_device_info_get_model_name(info));
+
+				/* Get AVTransport service for device */
+				upnpdevice->av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(info, UPNP_AV_TRANSPORT));
+				upnpdevice->server = deviceproxy;
+
+				/* Add device to list of current devices */
+				serversmap.insert(ServersMap::value_type(std::string(upnpdevice->id), upnpdevice));
+			}
+		}
+
 		return;
     }
 
@@ -1050,22 +1195,22 @@ std::string helperGetUserVariable(const std::string &name)
 	 * SonosGetDeviceData
 	 * Get extra information to create the domoticz devices 
 	 */
-	bool CSonosPlugin::SonosGetDeviceData(DeviceSessionData *upnprenderer, std::string& brand, std::string& model, std::string& name ) {
+	bool CSonosPlugin::SonosGetDeviceData(RendererDeviceData *upnpdevice, std::string& brand, std::string& model, std::string& name ) {
 		GUPnPDeviceProxy	*renderer;
 
-		renderer = upnprenderer->renderer;
+		renderer = upnpdevice->renderer;
 
 		// Extract Model. Sample: Sonos PLAY:1
 		//                Sample: XBMC Media Center
 		std::stringstream  stream(gupnp_device_info_get_model_name(GUPNP_DEVICE_INFO(renderer)));
-//		_log.Log(LOG_NORM,"(Sonos) GetDeviceData model-name \'%s\' IP %8X", stream.str().c_str(), upnprenderer->ip);
+//		_log.Log(LOG_NORM,"(Sonos) GetDeviceData model-name \'%s\' IP %8X", stream.str().c_str(), upnpdevice->ip);
 
 		stream >> brand;
 //		_log.Log(LOG_NORM,"(Sonos) GetDeviceData brand \'%s\'", brand.c_str() );
 		if (brand.compare(0,5, "Sonos") == 0) {
-			upnprenderer->type = UPNP_SONOS;
+			upnpdevice->type = UPNP_SONOS;
 		} else if (brand.compare(0,4, "XBMC") == 0) {
-			upnprenderer->type = UPNP_XBMC;
+			upnpdevice->type = UPNP_XBMC;
 		}
 
 		// Rest is the model name
@@ -1078,7 +1223,7 @@ std::string helperGetUserVariable(const std::string &name)
 		int fr_len = friendly_name.length();
 //		_log.Log(LOG_NORM,"(Sonos) GetDeviceData friendly-name \'%s\'", friendly_name.c_str());
 
-		if (upnprenderer->type == UPNP_SONOS) {
+		if (upnpdevice->type == UPNP_SONOS) {
 			std::size_t pos = friendly_name.find("-");
 			if (pos != std::string::npos) {
 				if (pos > 1)
@@ -1091,22 +1236,22 @@ std::string helperGetUserVariable(const std::string &name)
 
 #ifdef PLAY1_GET_TEMPERATURE
 			if (model.compare(0,6, "PLAY:1") == 0)
-				upnprenderer->type = UPNP_PLAY1;
+				upnpdevice->type = UPNP_PLAY1;
 #endif
 		} else {
 			name = friendly_name;
 
-			if (upnprenderer->type == UPNP_NULL)
-				upnprenderer->type = UPNP_OTHERS;
+			if (upnpdevice->type == UPNP_NULL)
+				upnpdevice->type = UPNP_OTHERS;
 		}
 
 		// Store friendly name for each device
-		if (upnprenderer->name == "") {
-			upnprenderer->name = name;
+		if (upnpdevice->name == "") {
+			upnpdevice->name = name;
 		}
 
 #ifdef _DEBUG
-		_log.Log(LOG_STATUS,"(Sonos) GetDeviceData brand \'%s\' model \'%s\' name \'%s\'", brand.c_str(), model.c_str(), name.c_str());
+		_log.Log(LOG_NORM,"(Sonos) GetDeviceData brand \'%s\' model \'%s\' name \'%s\'", brand.c_str(), model.c_str(), name.c_str());
 #endif
 		return true;
 	}
@@ -1114,46 +1259,77 @@ std::string helperGetUserVariable(const std::string &name)
 	/* This is our callback method to handle devices
 	 * which are removed from the network
 	 */
-	static void callbackDeviceUnavailable(GUPnPControlPoint *cp, GUPnPDeviceProxy *renderer)
+	static void callbackDeviceUnavailable(GUPnPControlPoint *cp, GUPnPDeviceProxy *deviceproxy)
 	{
-        GUPnPDeviceInfo* gupnp_device_info  = GUPNP_DEVICE_INFO(renderer);
+        GUPnPDeviceInfo* info  = GUPNP_DEVICE_INFO(deviceproxy);
+		RendererDeviceData *upnprenderer;
+		ServerDeviceData *upnpserver;
+		IteratorRenderer itr;
+		IteratorServer its;
+		bool isRenderer = false;
+		bool isLastMediaDevice = false;
+
+		/* Only allow MediaRenderers and MediaServers */
+		char *device_type = NULL;
+		device_type = (char *)gupnp_device_info_get_device_type (info);
+		if (strcmp(device_type, UPNP_MEDIA_RENDERER) == 0) {
+			isRenderer = true;
+		} else if (strcmp(device_type, UPNP_MEDIA_SERVER) == 0) {
+			isRenderer = false;
+		} else
+			return;
 
 		/* Extract IP and add device ip to list of current device ips */
 		char szDeviceID[30];
-		unsigned long longIP = helperGetIpFromLocation(gupnp_device_info_get_location (gupnp_device_info), szDeviceID);
+		unsigned long longIP = helperGetIpFromLocation(gupnp_device_info_get_location (info), szDeviceID);
 		std::stringstream ss;
 		ss << std::uppercase << std::setfill('0') << std::setw(8) << std::hex <<  longIP;
 		std::string deviceID(ss.str());
-//		sprintf(szDeviceID, "%8X", longIP);
-//		std::string	deviceID(szDeviceID);	
 
-		/* Get upnprenderer */
-	    DeviceSessionData *upnprenderer;
-//      upnprenderer = (DeviceSessionData *)g_hash_table_lookup(ipstore, deviceID.c_str());
-		IterIP it = ipstore.find(deviceID);
-		upnprenderer = (DeviceSessionData *)it->second;
+		/* Erase Renderer */
+		if (isRenderer == true) {
+			itr = renderersmap.find(deviceID);
+			if (itr != renderersmap.end()) {
+				upnprenderer = (RendererDeviceData *)itr->second;
 #ifdef _DEBUG
-		if (upnprenderer->name != "")
-			_log.Log(LOG_STATUS,"(Sonos) DeviceUnavailable %s", upnprenderer->name.c_str());
-		else
-			_log.Log(LOG_STATUS,"(Sonos) DeviceUnavailable name-unavailable %s", upnprenderer->id.c_str());
+				if (upnprenderer->name != "")
+					_log.Log(LOG_STATUS,"(Sonos) Renderer Unavailable %s", upnprenderer->name.c_str());
+				else
+					_log.Log(LOG_STATUS,"(Sonos) Renderer Unavailable name-unavailable %s", upnprenderer->id.c_str());
 #endif
 
-		/* Remove device from list of current devices */
-//		g_hash_table_remove(ipstore, const_cast<char*>(szDeviceID) );
-//		g_hash_table_remove(renderers, const_cast<char*>(gupnp_device_info_get_udn(gupnp_device_info)));
-		ipstore.erase(deviceID);
-		renderers.erase(std::string(gupnp_device_info_get_udn(gupnp_device_info)));
+				/* Remove device from list of current devices */
+				renderersmap.erase(deviceID);
+			}
 
-		/* Free upnprenderer and id and udn when unregistering device!! */
-//		if (upnprenderer != NULL) {
-//			if (upnprenderer->udn != NULL)
-//				free(upnprenderer->udn);
-//			if (upnprenderer->id != NULL)
-//				free(upnprenderer->id);
-//			if (upnprenderer->name != NULL)
-//				free(upnprenderer->name);
-//		}
+			its = serversmap.find(deviceID);
+			if (its == serversmap.end())
+				isLastMediaDevice = true;
+		} else {
+			/* Erase Server */
+			its = serversmap.find(deviceID);
+			if (its != serversmap.end()) {
+				upnpserver = (ServerDeviceData *)its->second;
+#ifdef _DEBUG
+				if (upnpserver->name != "")
+					_log.Log(LOG_STATUS,"(Sonos) Server Unavailable %s", upnpserver->name.c_str());
+				else
+					_log.Log(LOG_STATUS,"(Sonos) Server Unavailable name-unavailable %s", upnpserver->id.c_str());
+#endif
+
+				/* Remove device from list of current devices */
+				serversmap.erase(deviceID);
+			}
+
+			itr = renderersmap.find(deviceID);
+			if (itr == renderersmap.end()) 
+				isLastMediaDevice = true;
+		}
+
+		if (isLastMediaDevice) {
+			_log.Log(LOG_STATUS,"(Sonos) Server/Renderer Unavailable %s", deviceID.c_str());
+			mediadevicesmap.erase(std::string(gupnp_device_info_get_udn(info)));
+		}
 	}
 
 	/* Callback method to print out key details about
@@ -1165,16 +1341,16 @@ std::string helperGetUserVariable(const std::string &name)
 	{
 		SoupURI				*aa_uri;
 		SoupURI				*url_base;
-		DeviceSessionData	*upnprenderer;
+		RendererDeviceData	*upnpdevice;
 
-		upnprenderer = (DeviceSessionData *)pointer;
+		upnpdevice = (RendererDeviceData *)pointer;
 
 #ifdef _DEBUG
 //		_log.Log(LOG_STATUS,"(Sonos) Track Info ->");
 #endif
 
 		/* Get the URL base of the renderer */
-		url_base = (SoupURI *) gupnp_device_info_get_url_base(GUPNP_DEVICE_INFO((GUPnPDeviceProxy *)upnprenderer->renderer));
+		url_base = (SoupURI *) gupnp_device_info_get_url_base(GUPNP_DEVICE_INFO((GUPnPDeviceProxy *)upnpdevice->renderer));
 
 		/* to link with libsoup add soup-2.4 to cmake!!! */
 		/* Sometimes this errror message is received: */
@@ -1184,21 +1360,21 @@ std::string helperGetUserVariable(const std::string &name)
 			char *artist, *title, *album, *album_art;
 			std::stringstream trackinfo;
 
-			artist = (char*)gupnp_didl_lite_object_get_creator(object);
-			if (artist != NULL)
-				trackinfo << artist;
+			trackinfo << "[";
 
 			title = (char*)gupnp_didl_lite_object_get_title(object);
 			if (title != NULL)
-				trackinfo << " - " << title;
+				trackinfo << title << "] ";
+
+			artist = (char*)gupnp_didl_lite_object_get_creator(object);
+			if (artist != NULL)
+				trackinfo << "[" << artist << "] ";
 
 			album = (char*)gupnp_didl_lite_object_get_album(object);
-			if (album != NULL)
-				trackinfo << " - " << album;
+//			if (album != NULL) trackinfo << "[" << album << "] ";
 
 			album_art = (char*)soup_uri_to_string (aa_uri, FALSE);
-			if (album_art != NULL)
-				trackinfo << " - " << album_art;
+//			if (album_art != NULL) trackinfo << "]" << album_art << "]";
 
 			_log.Log(LOG_NORM, "(Sonos) Track: %s", trackinfo.str().c_str());
 		}
@@ -1213,24 +1389,24 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP Action method to pause AVT Transport on device
 	 */
-	bool CSonosPlugin::SonosActionPause(GUPnPServiceProxy *av_transport) {
+	bool CSonosPlugin::SonosActionPause(RendererDeviceData *upnpdevice) {
 		 GError *error = NULL;
 		 gboolean success;
 
 		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "Pause", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Pause", &error,
 													"InstanceID", G_TYPE_UINT, 0, NULL,
 													NULL);
 		if (!success) {
 			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) SonosActionPause error %s", error->message);
+				_log.Log(LOG_ERROR,"(Sonos) Pause error %s", error->message);
 				g_error_free (error);
 			}
 			return false;
 		}
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionPause success!");
+		_log.Log(LOG_NORM,"(Sonos) Pause success!");
 #endif
 		return true;
 	}
@@ -1238,24 +1414,24 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP AV Transport Action method to play next track on device
 	 */
-	bool CSonosPlugin::SonosActionNext(GUPnPServiceProxy *av_transport) {
+	bool CSonosPlugin::SonosActionNext(RendererDeviceData *upnpdevice) {
 		 GError *error = NULL;
 		 gboolean success;
 
 		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "Next", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Next", &error,
 													"InstanceID", G_TYPE_UINT, 0, NULL,
 													NULL);
 		if (!success) {
 			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) SonosActionNext error %s", error->message);
+				_log.Log(LOG_ERROR,"(Sonos) Next error %s", error->message);
 				g_error_free (error);
 				return false;
 			}
 		}
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionNext success!");
+		_log.Log(LOG_NORM,"(Sonos) Next success!");
 #endif
 		return true;
 	}
@@ -1263,24 +1439,24 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP AV Transport Action method to play previous track on device
 	 */
-	bool CSonosPlugin::SonosActionPrevious(GUPnPServiceProxy *av_transport) {		 
+	bool CSonosPlugin::SonosActionPrevious(RendererDeviceData *upnpdevice) {		 
 		 GError *error = NULL;
 		 gboolean success;
 
 		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "Previous", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Previous", &error,
 													"InstanceID", G_TYPE_UINT, 0, NULL,
 													NULL);
 		if (!success) {
 			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) SonosActionPrev error %s", error->message);
+				_log.Log(LOG_ERROR,"(Sonos) Prev error %s", error->message);
 				g_error_free (error);
 				return false;
 			}
 		}
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionPrev success!");
+		_log.Log(LOG_NORM,"(Sonos) Prev success!");
 #endif
 		return true;
 	}
@@ -1288,23 +1464,23 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP Action method to play AVT Transport on device
 	 */
-	bool CSonosPlugin::SonosActionPlay(GUPnPServiceProxy *av_transport) {
+	bool CSonosPlugin::SonosActionPlay(RendererDeviceData *upnpdevice) {
 		 GError *error = NULL;
 		 gboolean success;
 
 		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "Play", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Play", &error,
 													"InstanceID", G_TYPE_UINT, 0,
 													"Speed", G_TYPE_UINT, 1,
 													NULL,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionPlay error %s", error->message);
+			_log.Log(LOG_ERROR,"(Sonos) Play error %s", error->message);
 		    g_error_free (error);
 			return false;
 		}
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionPlay success!");
+		_log.Log(LOG_NORM,"(Sonos) Play success!");
 #endif
 		return true;
 	}
@@ -1312,14 +1488,10 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP AV Action method to set URI to play on Media Renderer
 	 */
-	bool CSonosPlugin::SonosActionSetURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type) {
+	bool CSonosPlugin::SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri ) {
 		GError *error;
 		gboolean success;
 		std::string metadata;
-
-#ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionSetURI [%s]", uri.c_str());
-#endif
 
 		/* Build metadata, this is very hacky but is good to show raw data */
 		std::string metadata1("&lt;DIDL-Lite xmlns:dc=&quot;http://purl.org/dc/elements/1.1/&quot;"
@@ -1336,15 +1508,16 @@ std::string helperGetUserVariable(const std::string &name)
 
 		/* metadata is metadata1 + uri + metadata2 */
 		std::stringstream temp;
-		if (type == UPNP_SONOS) {
-			temp << metadata1 << metadata2 << metadata3 << uri << metadata2;
+		if (upnpdevice->type == UPNP_SONOS) {
+			temp << metadata1 << metadata2 << metadata3 << uri << metadata4;
 		} else {
-			temp << metadata1 << metadata3 << uri << metadata2;
+//			temp << metadata1 << metadata3 << uri << metadata4;
+			temp << uri;
 		}
 		metadata = temp.str();
 
 		 /* Send action */
-		success = gupnp_service_proxy_send_action( av_transport, "SetAVTransportURI", &error,
+		success = gupnp_service_proxy_send_action( upnpdevice->av_transport, "SetAVTransportURI", &error,
 			"InstanceID", G_TYPE_UINT, 0,
 			"CurrentURI", G_TYPE_STRING, uri.c_str(),
 			"CurrentURIMetaData", G_TYPE_STRING, metadata.c_str(), 
@@ -1367,7 +1540,7 @@ std::string helperGetUserVariable(const std::string &name)
 	 * UPnP AV Action method to set next URI to play on Media Renderer
 	 * Not many UPnP devices support that command...
 	 */
-	bool CSonosPlugin::SonosActionSetNextURI(GUPnPServiceProxy *av_transport, const std::string& uri, int type) {
+	bool CSonosPlugin::SonosActionSetNextURI(RendererDeviceData *upnpdevice, const std::string& uri ) {
 		GError *error;
 		gboolean success;
 		std::string metadata;
@@ -1391,7 +1564,7 @@ std::string helperGetUserVariable(const std::string &name)
 
 		/* metadata is metadata1 + uri + metadata2 */
 		std::stringstream temp;
-		if (type == UPNP_SONOS) {
+		if (upnpdevice->type == UPNP_SONOS) {
 			temp << metadata1 << metadata2 << metadata3 << uri << metadata2;
 		} else {
 			temp << metadata1 << metadata3 << uri << metadata2;
@@ -1399,7 +1572,7 @@ std::string helperGetUserVariable(const std::string &name)
 		metadata = temp.str();
 
 		 /* Send action */
-		success = gupnp_service_proxy_send_action( av_transport, "SetNextAVTransportURI", &error,
+		success = gupnp_service_proxy_send_action( upnpdevice->av_transport, "SetNextAVTransportURI", &error,
 			"InstanceID", G_TYPE_UINT, 0,
 			"NextURI", G_TYPE_STRING, uri.c_str(),
 			"NextURIMetaData", G_TYPE_STRING, metadata.c_str(), 
@@ -1425,12 +1598,12 @@ std::string helperGetUserVariable(const std::string &name)
 	 * BecomeCoordinatorOfStandaloneGroup is ~ "Leave Group".  
 	 * To join a group set AVTransportURI to x-rincon:<udn>
 	 */
-	bool CSonosPlugin::SonosActionLeaveGroup(GUPnPServiceProxy *av_transport) {		 
+	bool CSonosPlugin::SonosActionLeaveGroup(RendererDeviceData *upnpdevice) {		 
 		 GError *error = NULL;
 		 gboolean success;
 
 		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "BecomeCoordinatorOfStandaloneGroup", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "BecomeCoordinatorOfStandaloneGroup", &error,
 													"InstanceID", G_TYPE_UINT, 0, NULL,
 													NULL);
 		if (!success) {
@@ -1451,7 +1624,7 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP AV Action method to Get Transport Info for device
 	 */
-	bool CSonosPlugin::SonosActionGetTransportInfo(GUPnPServiceProxy *av_transport, std::string& state) {
+	bool CSonosPlugin::SonosActionGetTransportInfo(RendererDeviceData *upnpdevice, std::string& state) {
 		 GError *error = NULL;
 		 gboolean success;
 
@@ -1459,7 +1632,7 @@ std::string helperGetUserVariable(const std::string &name)
 		 char *CurrentTransportState;
 		 char *CurrentTransportStatus;
 		 char *CurrentSpeed;
-		 success = gupnp_service_proxy_send_action (av_transport, "GetTransportInfo", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetTransportInfo", &error,
 													"InstanceID", G_TYPE_UINT, 0, 
 													NULL,
 													"CurrentTransportState", G_TYPE_STRING, &CurrentTransportState,
@@ -1484,7 +1657,7 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP AV Action method to Get Position Info for device
 	 */
-	bool CSonosPlugin::SonosActionGetPositionInfo(GUPnPServiceProxy *av_transport, std::string& currenturi) {
+	bool CSonosPlugin::SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, std::string& currenturi) {
 		 GError *error = NULL;
 		 gboolean success;
 
@@ -1494,7 +1667,7 @@ std::string helperGetUserVariable(const std::string &name)
 		 char *CurrentTrackMetaData;
 		 char *CurrentTrackURI;
 		 int RelativeTimePosition, AbsoluteTimePosition, RelativeCounterPosition, AbsoluteCounterPosition;
-		 success = gupnp_service_proxy_send_action (av_transport, "GetPositionInfo", &error,
+		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetPositionInfo", &error,
 													"InstanceID", G_TYPE_UINT, 0, 
 													NULL,
 													"Track", G_TYPE_STRING, &CurrentTrack,
@@ -1511,24 +1684,49 @@ std::string helperGetUserVariable(const std::string &name)
 			return false;
 		}
 
-		if ((strcmp(CurrentTrackMetaData, "NOT_IMPLEMENTED") == 0) &&
-			(strncmp(CurrentTrackURI, "x-rincon:", 9) == 0)) {
-			//  this means that this zone is a slave to the master or group coordinator with the given id RINCON_xxxxxxxxx
-			std::string currentrackuri(CurrentTrackURI);
-			std::string zone_coordinator = currentrackuri.substr(9, std::string::npos);
-			_log.Log(LOG_NORM,"(Sonos) Track - same as zone coordinator [%s]", zone_coordinator.c_str());
-//			upnprenderer->coordinator = zone_coordinator;
+		if (strcmp(CurrentTrackMetaData, "NOT_IMPLEMENTED") == 0) {
+			if (strncmp(CurrentTrackURI, "x-rincon:", 9) == 0) {
+				//  this means that this zone is a slave to the master or group coordinator with the given id RINCON_xxxxxxxxx
+				std::string currentrackuri(CurrentTrackURI);
+				std::string zone_coordinator = currentrackuri.substr(9, std::string::npos);
+				_log.Log(LOG_NORM,"(Sonos) Track - same as zone coordinator [%s]", zone_coordinator.c_str());
+				upnpdevice->coordinator = zone_coordinator;
+			}
 		} else {
-//			upnprenderer->coordinator = "";
+			upnpdevice->coordinator = "";
+		}
+
+		/* Get protocol */
+		/* On Sonos AbsoluteTimePosition is always - NOT_IMPLEMENTED */
+		if (strncmp(CurrentTrackURI, "x-sonosapi-stream:", 18) == 0) {
+			upnpdevice->protocol = SONOS_PROTOCOL_LINEIN;
+#ifdef _DEBUG
+		_log.Log(LOG_NORM,"(Sonos) Info LineIn URI[%s] Tr[%s] Dur[%s] RPos[%s] RC[%d] AC[%d]", 
+			CurrentTrackURI, CurrentTrack, CurrentTrackDuration, RelativeTimePosition, RelativeCounterPosition, AbsoluteCounterPosition);
+#endif
+		} else if (strncmp(CurrentTrackURI, "x-sonos-http:", 9) == 0) {
+			upnpdevice->protocol = SONOS_PROTOCOL_FILE;
+#ifdef _DEBUG
+		_log.Log(LOG_NORM,"(Sonos) Info File/Queue URI[%s] Tr[%s] Dur[%s] RPos[%s] RC[%d] AC[%d]", 
+			CurrentTrackURI, CurrentTrack, CurrentTrackDuration, RelativeTimePosition, RelativeCounterPosition, AbsoluteCounterPosition);
+#endif
+		} else if (strncmp(CurrentTrackURI, "x-rincon-mp3radio:", 18) == 0) {
+			upnpdevice->protocol = SONOS_PROTOCOL_RADIO;
+#ifdef _DEBUG
+		_log.Log(LOG_NORM,"(Sonos) Info Radio URI[%s] Tr[%s] Dur[%s] RPos[%s] RC[%d] AC[%d]", 
+			CurrentTrackURI, CurrentTrack, CurrentTrackDuration, RelativeTimePosition, RelativeCounterPosition, AbsoluteCounterPosition);
+#endif
+		} else {
+			upnpdevice->protocol = SONOS_PROTOCOL_NONE;
+#ifdef _DEBUG
+		_log.Log(LOG_NORM,"(Sonos) GetPositionInfo URI[%s] Tr[%s] Dur[%s] RPos[%s] RC[%d] AC[%d]", 
+			CurrentTrackURI, CurrentTrack, CurrentTrackDuration, RelativeTimePosition, RelativeCounterPosition, AbsoluteCounterPosition);
+#endif
 		}
 
 		std::string trackuri(CurrentTrackURI);
 		currenturi = trackuri;
 
-#ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) GetPositionInfo Tr[%s] TrD[%s] TrURI[%s] RT[%s] AT[%s] RC[%d] AC[%d]", 
-			CurrentTrack, CurrentTrackDuration, CurrentTrackURI, RelativeTimePosition, AbsoluteTimePosition, RelativeCounterPosition, AbsoluteCounterPosition);
-#endif
 		return true;
 	}
 
@@ -1537,59 +1735,15 @@ std::string helperGetUserVariable(const std::string &name)
     /*+------------------------------------------------------------------------+*/
 
 	/*
-	 * Helper method to get Renderer handle
-	 */
-	bool CSonosPlugin::SonosGetRenderer(const std::string& deviceID, DeviceSessionData **upnprenderer) {
-		/* Get renderer from IP */
-		IterIP it = ipstore.find(deviceID);
-		(*upnprenderer) = (DeviceSessionData *)it->second;
-		if ((*upnprenderer)->renderer == 0) {
-			_log.Log(LOG_ERROR,"(Sonos) Error getting device %s", deviceID.c_str());
-			return false;
-		}
-		return true;
-	}
-
-	/*
-	 * Helper method to get AVTransport handle
-	 */
-	bool CSonosPlugin::SonosGetServiceAVTransport(DeviceSessionData *upnprenderer, GUPnPServiceProxy **av_transport) {
-		/* Get AVTransport service for device */
-		*av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnprenderer->renderer), 
-                       UPNP_AV_TRANSPORT));
-		if (*av_transport == 0) {
-			_log.Log(LOG_ERROR,"(Sonos) Error getting av_transport for device %s", upnprenderer->name.c_str());
-			return false;
-		}
-
-		return true;
-	}
-
-	/*
-	 * Helper method to get control service handle
-	 */
-	bool CSonosPlugin::SonosGetServiceRenderingControl(DeviceSessionData *upnprenderer, GUPnPServiceProxy **rendering_control) {
-		/* Get control service for device */
-		*rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnprenderer->renderer), 
-                       UPNP_RENDERING_CONTROL));
-		if (*rendering_control == 0) {
-			_log.Log(LOG_ERROR,"(Sonos) Error getting av_transport for device %s", upnprenderer->name.c_str());
-			return false;
-		}
-
-		return true;
-	}
-
-	/*
 	 * UPnP Action method to get volume from device
 	 */
-	int CSonosPlugin::SonosActionGetVolume(DeviceSessionData *upnprenderer) {
+	int CSonosPlugin::SonosActionGetVolume(RendererDeviceData *upnpdevice) {
 		 /* Get rendering control service for device */
 		 GUPnPServiceProxy *rendering_control;
-		 rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnprenderer->renderer), 
+		 rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
                        UPNP_RENDERING_CONTROL));
 		 if (rendering_control == 0) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionGetVolume error getting rendering control for device %s", upnprenderer->name.c_str());
+			_log.Log(LOG_ERROR,"(Sonos) GetVolume error getting rendering control for device %s", upnpdevice->name.c_str());
 			return -1;
 		 }
 
@@ -1604,12 +1758,12 @@ std::string helperGetUserVariable(const std::string &name)
 													"CurrentVolume", G_TYPE_UINT, &volume,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionGetVolume error %s", error->message);
+			_log.Log(LOG_ERROR,"(Sonos) GetVolume error %s", error->message);
 		    g_error_free (error);
 			return -1;
 		}
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionGetVolume Current volume=%d for %s", volume, upnprenderer->name.c_str());
+		_log.Log(LOG_NORM,"(Sonos) GetVolume Current volume=%d for %s", volume, upnpdevice->name.c_str());
 #endif
 		return(volume);
 	}
@@ -1617,14 +1771,14 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP Action method to set volume on device
 	 */
-	bool CSonosPlugin::SonosActionSetVolume(DeviceSessionData *upnprenderer, int level) {
+	bool CSonosPlugin::SonosActionSetVolume(RendererDeviceData *upnpdevice, int level) {
 		/* Get rendering control service for device */
 		GUPnPServiceProxy *rendering_control;
-		rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnprenderer->renderer), 
+		rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
 			UPNP_RENDERING_CONTROL));
 		if (rendering_control == 0) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionSetVolume error getting rendering control for device %s", 
-				upnprenderer->name.c_str());
+			_log.Log(LOG_ERROR,"(Sonos) SetVolume error getting rendering control for device %s", 
+				upnpdevice->name.c_str());
 			return false;
 		}
 
@@ -1639,12 +1793,12 @@ std::string helperGetUserVariable(const std::string &name)
 			NULL,
 			NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionSetVolume error %s", error->message);
+			_log.Log(LOG_ERROR,"(Sonos) SetVolume error %s", error->message);
 			g_error_free (error);
 			return false;
 		}
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionSetVolume %s %d success!", upnprenderer->name.c_str(), volume);
+		_log.Log(LOG_NORM,"(Sonos) SetVolume %s %d success!", upnpdevice->name.c_str(), volume);
 #endif
 		return true;
 	}
@@ -1655,31 +1809,35 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP Action method to browse Content Directory
 	 */
-	bool CSonosPlugin::SonosActionLoadQueue(DeviceSessionData *upnprenderer, std::string& sURL) {
-		/* Get content directory service for device */
+	bool CSonosPlugin::SonosActionLoadQueue(ServerDeviceData *upnpdevice, std::string& sURL) {
 		GUPnPServiceProxy *content_directory;
-
-		GUPnPDeviceInfo *info = GUPNP_DEVICE_INFO(upnprenderer->renderer);
-		_log.Log(LOG_ERROR, "(Sonos) LoadQueue device info %x", info);
+		GUPnPDeviceInfo *info = GUPNP_DEVICE_INFO(upnpdevice->server);
 		 
  		// List services available
-		GList *services, *s;
-	 	int i;
-	 	services = gupnp_device_info_list_service_types (info);
-	 	for (s = services, i = 0; s; s = s->next, i++) {
-	 		char *type = (char *)s->data;	 	
-	 		_log.Log(LOG_STATUS,"(Sonos) LoadQueue service [%d]: %s", i, type);
-	 		g_free (type);
-	 	}
-	 	g_list_free (services);
+		// Typically for Sonos:
+		// (Sonos) LoadQueue service [0]: urn:schemas-upnp-org:service:ConnectionManager:1
+		// (Sonos) LoadQueue service [1]: urn:schemas-upnp-org:service:ContentDirectory:1
+//		GList *services, *s;
+//	 	int i;
+//	 	services = gupnp_device_info_list_service_types (info);
+//	 	for (s = services, i = 0; s; s = s->next, i++) {
+//	 		char *type = (char *)s->data;	 	
+//	 		_log.Log(LOG_STATUS,"(Sonos) LoadQueue service [%d]: %s", i, type);
+//	 		g_free (type);
+//		}
+//	 	g_list_free (services);
 
+		/* Get content directory service for device */
 		GUPnPServiceInfo *proxy = gupnp_device_info_get_service(info, UPNP_CONTENT_DIRECTORY);
-		_log.Log(LOG_ERROR, "(Sonos) LoadQueue service info %x", proxy);
+		if (proxy == NULL) {
+			_log.Log(LOG_ERROR, "(Sonos) LoadQueue service info %x", proxy);
+			return false;
+		}
 
 		content_directory = GUPNP_SERVICE_PROXY (proxy);
-		if (content_directory == 0) {
+		if (content_directory == NULL) {
 			_log.Log(LOG_ERROR, "(Sonos) LoadQueue error getting content directory for device %s", 
-				upnprenderer->name.c_str());
+				upnpdevice->id.c_str());
 			return false;
 		}
 
@@ -1690,26 +1848,26 @@ std::string helperGetUserVariable(const std::string &name)
 		char *result;
 		int NumberReturned, TotalMatches, UpdateID;
 		success = (bool)gupnp_service_proxy_send_action (content_directory, "Browse", &error,
-													"ObjectID", G_TYPE_STRING, "SQ",
+													"ObjectID", G_TYPE_STRING, "Q:",
 													"BrowseFlag", G_TYPE_STRING, "BrowseDirectChildren",
-													"Filter", G_TYPE_STRING, NULL,
+													"Filter", G_TYPE_STRING, "*",
 													"StartingIndex", G_TYPE_UINT, 0,
 													"RequestedCount", G_TYPE_UINT, 1,
 													"SortCriteria", G_TYPE_STRING, NULL,
 													NULL,
-													"Result", G_TYPE_STRING, &result,
 													"NumberReturned", G_TYPE_UINT, &NumberReturned,
 													"TotalMatches", G_TYPE_UINT, &TotalMatches,
 													"UpdateID", G_TYPE_UINT, &UpdateID,
+													"Result", G_TYPE_STRING, &result,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) LoadQueue error %s", error->message);
+			_log.Log(LOG_ERROR,"(Sonos) LoadQueue error %d %s", error, error->message);
 		    g_error_free (error);
 			return false;
 		}
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) LoadQueue %s NR[%d] TM[%d] UID[%d]", upnprenderer->name.c_str(),
-			NumberReturned, TotalMatches, UpdateID );
+		_log.Log(LOG_NORM,"(Sonos) LoadQueue %s NR[%d] TM[%d] UID[%d] %s", upnpdevice->id.c_str(),
+			NumberReturned, TotalMatches, UpdateID, result );
 #endif
 
 		/* Browse - Get what's in the queue */
@@ -1720,16 +1878,16 @@ std::string helperGetUserVariable(const std::string &name)
 													"BrowseFlag", G_TYPE_STRING, "BrowseMetadata",
 													"Filter", G_TYPE_STRING, NULL,
 													"StartingIndex", G_TYPE_UINT, 0,
-													"RequestedCount", G_TYPE_UINT, 10,
+													"RequestedCount", G_TYPE_UINT, 1,
 													"SortCriteria", G_TYPE_STRING, NULL,
 													NULL,
-													"Result", G_TYPE_STRING, &result,
 													"NumberReturned", G_TYPE_UINT, &NumberReturned,
 													"TotalMatches", G_TYPE_UINT, &TotalMatches,
 													"UpdateID", G_TYPE_UINT, &UpdateID,
+//													"Result", G_TYPE_STRING, &result,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) CD Browse error %s", error->message);
+			_log.Log(LOG_ERROR,"(Sonos) CD Browse error %d %s", error, error->message);
 		    g_error_free (error);
 			return false;
 		}
@@ -1738,7 +1896,7 @@ std::string helperGetUserVariable(const std::string &name)
 		sURL = std::string(result);
 #ifdef _DEBUG
 		_log.Log(LOG_NORM,"(Sonos) CD Browse %s NR[%d] TM[%d] UID[%d] \n------------------\nresult\n-------------------", 
-			upnprenderer->name.c_str(), NumberReturned, TotalMatches, UpdateID, result );
+			upnpdevice->id.c_str(), NumberReturned, TotalMatches, UpdateID, result );
 #endif
 
 		return(true);
@@ -1747,29 +1905,31 @@ std::string helperGetUserVariable(const std::string &name)
 	/*
 	 * UPnP Action method to browse Content Directory
 	 */
-	bool CSonosPlugin::SonosActionSaveQueue(DeviceSessionData *upnprenderer) {
-		 GError *error = NULL;
-		 gboolean success;
-		 
-		 GUPnPServiceProxy *av_transport;
-		 SonosGetServiceAVTransport(upnprenderer, &av_transport);
+	bool CSonosPlugin::SonosActionSaveQueue(RendererDeviceData *upnpdevice) {
+		GError *error = NULL;
+		gboolean success;
 
-		 /* Send action */
-		 success = gupnp_service_proxy_send_action (av_transport, "SaveQueue", &error,
-													"InstanceID", G_TYPE_UINT, 0, 
-													NULL,
-													"Title", G_TYPE_STRING, "SQ:24", 
-													"ObjectID", G_TYPE_STRING, NULL,
-													NULL);
-		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) SaveQueue error %d-%s", error, error->message);
-		    g_error_free (error);
-			return false;
-		}
+		/* Send action */
+		if (upnpdevice->av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) SaveQueue av_transport (null) for %s", upnpdevice->name.c_str());
+		} else {
+			success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "SaveQueue", &error,
+				"InstanceID", G_TYPE_UINT, 0, 
+				"Title", G_TYPE_STRING, SONOS_SAVED_QUEUE_NAME, 
+				"ObjectID", G_TYPE_STRING, NULL,
+				NULL,
+				NULL);
+			if (!success) {
+				_log.Log(LOG_ERROR,"(Sonos) SaveQueue error %d %s", error, error->message);
+				g_error_free (error);
+				return false;
+			}
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SaveQueue for %s", upnprenderer->name.c_str());
+			_log.Log(LOG_NORM,"(Sonos) SaveQueue for %s", upnpdevice->name.c_str());
 #endif
+		}
+
 		return true;
 	}
 
@@ -1781,24 +1941,21 @@ std::string helperGetUserVariable(const std::string &name)
 	 * SonosActionGetPlay1Temperature
 	 * See http://www.hifi-forum.de/viewthread-100-623-4.html 
 	 */
-	bool CSonosPlugin::SonosActionGetPlay1Temperature(DeviceSessionData *upnprenderer, std::string& temperature)
+	bool CSonosPlugin::SonosActionGetPlay1Temperature(RendererDeviceData *upnpdevice, std::string& temperature)
 	{
-//		char *ptr;
-//		char szIP[25];
 		unsigned long ulIpAddress=0;
 		unsigned int id1=0, id2=0, id3=0, id4=0;
 
 		// IP unsigned long to string
-		std::istringstream iss(upnprenderer->id);
+		std::istringstream iss(upnpdevice->id);
 		iss >> std::hex >> ulIpAddress;
-//		sscanf(devID.c_str(), "%8X", &ulIpAddress);
 		id1 = (ulIpAddress>> 24) & 0xFF;
 		id2 = (ulIpAddress>> 16) & 0xFF;
 		id3 = (ulIpAddress>> 8) & 0xFF;
 		id4 = (ulIpAddress) & 0xFF;
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"SonosActionGetPlay1Temperature: deviceID %s uLong %8X id %d.%d.%d.%d", 
-			upnprenderer->name.c_str(), ulIpAddress, id4, id3, id2, id1);
+		_log.Log(LOG_NORM,"GetPlay1Temperature: deviceID %s uLong %8X id %d.%d.%d.%d", 
+			upnpdevice->name.c_str(), ulIpAddress, id4, id3, id2, id1);
 #endif	   
 
 		std::string sResult;
@@ -1808,11 +1965,11 @@ std::string helperGetUserVariable(const std::string &name)
 		std::string sURL=ss.str();
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"SonosActionGetPlay1Temperature: get Url %s", sURL.c_str());
+		_log.Log(LOG_NORM,"GetPlay1Temperature: get Url %s", sURL.c_str());
 #endif
 		bret=HTTPClient::GET(sURL,sResult);
 		if (!bret) {
-			_log.Log(LOG_ERROR,"SonosActionGetPlay1Temperature: Error getting http data %8X (%s)!", 
+			_log.Log(LOG_ERROR,"GetPlay1Temperature: Error getting http data %8X (%s)!", 
 				ulIpAddress, sURL.c_str());
 			temperature = "";
 			return false;
@@ -1825,7 +1982,7 @@ std::string helperGetUserVariable(const std::string &name)
 	    
 		temperature = sTemperature;
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionGetPlay1Temperature: Temp %s", temperature.c_str());
+		_log.Log(LOG_NORM,"(Sonos) GetPlay1Temperature: Temp %s", temperature.c_str());
 #endif
 	    // Sample data read: 004e:    41 Celsius: CPU Temperature sensor (fault 86, warn 0)
 	    return true;
@@ -1868,7 +2025,7 @@ std::string helperGetUserVariable(const std::string &name)
 		std::string sURLTTS(ssURL.str());
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionSay start %s", sURLTTS.c_str());
+		_log.Log(LOG_NORM,"(Sonos) Say start %s", sURLTTS.c_str());
 #endif
 
 		// --------------------------------------------------------------------
@@ -1896,11 +2053,11 @@ std::string helperGetUserVariable(const std::string &name)
 
 		bret=HTTPClient::GETBinaryToFile(sURLTTS,filepath);
 		if (!bret) {
-			_log.Log(LOG_ERROR,"(Sonos) SonosActionSay: Error getting http (%s)!", sURLTTS.c_str());
+			_log.Log(LOG_ERROR,"(Sonos) Say: Error getting http (%s)!", sURLTTS.c_str());
 			return false;
 		}
 //		} else {
-//			_log.Log(LOG_NORM,"(Sonos) SonosActionSay: Using cached tts message file: %s", filepath.c_str());
+//			_log.Log(LOG_NORM,"(Sonos) Say: Using cached tts message file: %s", filepath.c_str());
 //		}
 
 
@@ -1930,10 +2087,11 @@ std::string helperGetUserVariable(const std::string &name)
 		// url = std::string(ssURL.str());
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) SonosActionSay success (%s)!", url.c_str());
+		_log.Log(LOG_NORM,"(Sonos) Say success (%s)!", url.c_str());
 #endif
 		return true;
 	}
+#endif
 
     /*+------------------------------------------------------------------------+*/
     /*| SonosInit - This is the start discovery method                         |*/
@@ -1942,11 +2100,9 @@ std::string helperGetUserVariable(const std::string &name)
     {
         /* Save this class instance for use from helper/caller methods */
         thisInstance = this;
-        
-		/* Create a new map/table to store the discovered devices in */
-//        renderers = g_hash_table_new(g_str_hash, g_str_equal);
-//        ipstore = g_hash_table_new(g_str_hash, g_str_equal);
 
+#if defined WIN32
+#elif defined __linux__
         /* Create a new parser to help with decoding the AV XML data */
         lc_parser = gupnp_last_change_parser_new();
 
@@ -1960,25 +2116,21 @@ std::string helperGetUserVariable(const std::string &name)
 		m_host_ip = ip;
 		_log.Log(LOG_NORM,"(Sonos) SonosInit host IP %s", m_host_ip.c_str());        
 
-        /* Create a Control Point targeting UPnP AV MediaRenderer devices */
-        cp = gupnp_control_point_new(context, UPNP_MEDIA_RENDERER);	 // "upnp:rootdevice");	//   // GSSDP_ALL_RESOURCES 
-        
-        /* The device-proxy-available signal is emitted when any devices which match
-           our target are found, so connect to it */
-        g_signal_connect (cp,
-                        "device-proxy-available",
-                        G_CALLBACK (callbackDeviceDiscovered),
-                        NULL);
+        /* Create Control Points targeting UPnP AV MediaRenderer and MediaServer devices */
+        cpmr = gupnp_control_point_new(context, UPNP_MEDIA_RENDERER);	 // "upnp:rootdevice");	//   // GSSDP_ALL_RESOURCES 
+        cpms = gupnp_control_point_new(context, UPNP_MEDIA_SERVER);	 
 
-        /* The device-proxy-unavailable signal is emitted when any devices which match
-           our target are removed, so connect to it */
-        g_signal_connect( cp,
-                    "device-proxy-unavailable",
-                    G_CALLBACK (callbackDeviceUnavailable),
-                    NULL);
+        /* The device-proxy-available signal is emitted when target devices are found - connect to it */
+        g_signal_connect (cpmr, "device-proxy-available", G_CALLBACK (callbackDeviceDiscovered), NULL);
+        g_signal_connect (cpms, "device-proxy-available", G_CALLBACK (callbackDeviceDiscovered), NULL);
+
+        /* The device-proxy-unavailable signal is emitted when target devices are removed - connect to it */
+        g_signal_connect( cpmr, "device-proxy-unavailable", G_CALLBACK (callbackDeviceUnavailable), NULL);
+        g_signal_connect( cpms, "device-proxy-unavailable", G_CALLBACK (callbackDeviceUnavailable), NULL);
         
-        /* Tell the Control Point to start searching */
-        gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cp), TRUE);
+        /* Tell the Control Points to start searching */
+        gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpmr), TRUE);
+        gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpms), TRUE);
         
         /* Set a timeout of RUN_TIME seconds to do some things */
 		g_timeout_add_seconds( RUN_TIME, callbackTimeout, NULL);
@@ -1991,13 +2143,14 @@ std::string helperGetUserVariable(const std::string &name)
 
 		/* Clean up */
         g_main_loop_unref (main_loop);
-        g_object_unref (cp);
+        g_object_unref (cpmr);
+        g_object_unref (cpms);
         g_object_unref (context);
-        
-		/* @@@ Clean up hashtables - and its keys! */
+#endif        
+
         return;
     }
-#endif
+
 
 
 #ifdef DOCUMENTATION_FOR_NEXT_ADDITIONS

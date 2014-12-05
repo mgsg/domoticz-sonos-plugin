@@ -91,11 +91,13 @@ namespace server {
 } //namespace server
 } //namespace tcp
 
-MainWorker::MainWorker()
+MainWorker::MainWorker() :
+m_LastSunriseSet("")
 {
 	m_SecCountdown=-1;
 	m_stoprequested=false;
 	m_verboselevel=EVBL_None;
+	
 	m_bStartHardware=false;
 	m_hardwareStartCounter=0;
 	m_webserverport="8080";
@@ -262,9 +264,6 @@ bool MainWorker::GetSunSettings()
 	std::string Latitude=strarray[0];
 	std::string Longitude=strarray[1];
 
-	std::string LastSunriseSet;
-	m_sql.GetTempVar("SunRiseSet", nValue, LastSunriseSet);
-
 	unsigned char *pData=NULL;
 	unsigned long ulLength=0;
 	time_t atime=mytime(NULL);
@@ -290,9 +289,9 @@ bool MainWorker::GetSunSettings()
 	sprintf(szRiseSet,"%02d:%02d:00",sresult.SunSetHour,sresult.SunSetMin);
 	sunset=szRiseSet;
 	std::string riseset=sunrise+";"+sunset;
-	if (LastSunriseSet != riseset)
+	if (m_LastSunriseSet != riseset)
 	{
-		m_sql.UpdateTempVar("SunRiseSet", riseset.c_str());
+		m_LastSunriseSet = riseset;
 		_log.Log(LOG_NORM, "Sunrise: %s SunSet:%s", sunrise.c_str(), sunset.c_str());
 	}
 	m_scheduler.SetSunRiseSetTimers(sunrise, sunset);
@@ -585,6 +584,7 @@ bool MainWorker::Start()
 	{
 		return false;
 	}
+	GetSunSettings();
 	//Add Hardware devices
 	std::vector<std::vector<std::string> > result;
 	std::stringstream szQuery;
@@ -624,7 +624,6 @@ bool MainWorker::Start()
 #endif
 	if (!StartThread())
 		return false;
-	GetSunSettings();
 	return true;
 }
 
@@ -1148,6 +1147,13 @@ unsigned long long MainWorker::PerformRealActionFromDomoticzClient(const unsigne
 		ID = szTmp;
 		Unit=pResponse->CHIME.sound;
 	}
+	else if (devType == pTypeThermostat)
+	{
+		const _tThermostat *pMeter = (const _tThermostat*)pResponse;
+		sprintf(szTmp, "%X%02X%02X%02X", pMeter->id1, pMeter->id2, pMeter->id3, pMeter->id4);
+		ID = szTmp;
+		Unit = 0;
+	}
 	else if (devType == pTypeThermostat2)
 	{
 		ID = "1";
@@ -1217,8 +1223,13 @@ void MainWorker::DecodeRXMessage(const CDomoticzHardwareBase *pHardware, const u
 	_log.Log(LOG_NORM,"%s",sstream.str().c_str());
 #endif
 	// convert now to string form
-	char *szDate = asctime(localtime(&now));
-	szDate[strlen(szDate) - 1] = 0;
+	struct tm *tm;
+	time_t atime = mytime(NULL);
+	tm = localtime(&atime);
+	char szDate[100];
+	sprintf(szDate, "%04d-%02d-%02d %02d:%02d:%02d",
+		+tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+		+tm->tm_hour, tm->tm_min, tm->tm_sec);
 
 	unsigned long long DeviceRowIdx=-1;
 	tcp::server::CTCPClient *pClient2Ignore=NULL;
@@ -1242,6 +1253,7 @@ void MainWorker::DecodeRXMessage(const CDomoticzHardwareBase *pHardware, const u
 			case pTypeRFY:
 			case pTypeSecurity1:
 			case pTypeChime:
+			case pTypeThermostat:
 			case pTypeThermostat2:
 			case pTypeThermostat3:
 				//we received a control message from a domoticz client,
@@ -1436,27 +1448,31 @@ void MainWorker::DecodeRXMessage(const CDomoticzHardwareBase *pHardware, const u
 	if (DeviceRowIdx == -1)
 		return;
 
-	std::stringstream sTmp;
-	std::string sdevicetype = RFX_Type_Desc(pRXCommand[1], 1);
-	if (pRXCommand[1] == pTypeGeneral)
+	if (pHardware->m_bOutputLog)
 	{
-		const _tGeneralDevice *pMeter = (const _tGeneralDevice*)pRXCommand;
-		sdevicetype += "/" + std::string(RFX_Type_SubType_Desc(pMeter->type, pMeter->subtype));
-	}
+		std::stringstream sTmp;
+		std::string sdevicetype = RFX_Type_Desc(pRXCommand[1], 1);
+		if (pRXCommand[1] == pTypeGeneral)
+		{
+			const _tGeneralDevice *pMeter = (const _tGeneralDevice*)pRXCommand;
+			sdevicetype += "/" + std::string(RFX_Type_SubType_Desc(pMeter->type, pMeter->subtype));
+		}
 #ifdef COMPLETE_LOG_MESSAGES			// m_g_s_g - Sonos - Only log actuators, not sensors
-	sTmp << szDate << " (" << pHardware->Name << ") " << sdevicetype << " (" << m_LastDeviceName << ")";
-	WriteMessageStart();
-	WriteMessage(sTmp.str().c_str());
-	WriteMessageEnd();
-#else
-	// m_g_s_g - Sonos. Filter log messages when device < 0x50/pTypeThermostat1 - only for actuators/switches/proactive and not for sensors/reactive
-	if (pRXCommand[1] < pTypeThermostat1) {
-		sTmp << szDate << " (" << pHardware->Name << ") " << sdevicetype << " (" << m_LastDeviceName << ") Idx (" << DeviceRowIdx << ") (" << (int)(pRXCommand[1]) << ")";
+		sTmp << szDate << " (" << pHardware->Name << ") " << sdevicetype << " (" << m_LastDeviceName << ")";
 		WriteMessageStart();
 		WriteMessage(sTmp.str().c_str());
 		WriteMessageEnd();
-	}
+#else
+		// m_g_s_g - Sonos. Filter log messages when device < 0x50/pTypeThermostat1 - only for actuators/switches/proactive and not for sensors/reactive
+		if (pRXCommand[1] < pTypeThermostat1) {
+			sTmp << szDate << " (" << pHardware->Name << ") " << sdevicetype << " (" << m_LastDeviceName << ") Idx (" << DeviceRowIdx << ") (" << (int)(pRXCommand[1]) << ")";
+			WriteMessageStart();
+			WriteMessage(sTmp.str().c_str());
+			WriteMessageEnd();
+		}
 #endif
+	}
+
 	//Send to connected Sharing Users
 	m_sharedserver.SendToAll(DeviceRowIdx,(const char*)pRXCommand,pRXCommand[0]+1,pClient2Ignore);
 
@@ -2369,7 +2385,7 @@ unsigned long long MainWorker::decode_Hum(const CDomoticzHardwareBase *pHardware
 		result=m_sql.query(szTmp);
 		if (result.size()==1)
 		{
-			temp=(float)atof(result[0][0].c_str());
+			temp = static_cast<float>(atof(result[0][0].c_str()));
 			float AddjValue=0.0f;
 			float AddjMulti=1.0f;
 			m_sql.GetAddjustment(HwdID, ID.c_str(),2,pTypeTEMP_HUM,sTypeTH_LC_TC,AddjValue,AddjMulti);
@@ -8716,6 +8732,12 @@ bool MainWorker::SetSetPointInt(const std::vector<std::string> &sd, const float 
 		tmeter.dunit=1;
 		tmeter.temp=TempValue;
 		WriteToHardware(HardwareID,(const char*)&tmeter,sizeof(_tThermostat));
+
+		if (pHardware->HwdType == HTYPE_Dummy)
+		{
+			//Also set it in the database, ad this devices does not send updates
+			DecodeRXMessage(pHardware, (const unsigned char*)&tmeter);
+		}
 	}
 	return true;
 }
@@ -9042,7 +9064,11 @@ bool MainWorker::SwitchScene(const unsigned long long idx, const std::string &sw
 
 			int ilevel=maxDimLevel-1;
 
-			if ((switchtype == STYPE_Dimmer)&&(maxDimLevel!=0))
+			if (
+				((switchtype == STYPE_Dimmer) || 
+				(switchtype == STYPE_BlindsPercentage) || 
+				(switchtype == STYPE_BlindsPercentageInverted) 
+				) && (maxDimLevel != 0))
 			{
 				if (intswitchcmd == "On")
 				{
@@ -9233,6 +9259,16 @@ void MainWorker::HeartbeatUpdate(const std::string component)
 	}
 	else {
 		m_componentheartbeats[component] = now;
+	}
+}
+
+void MainWorker::HeartbeatRemove(const std::string component)
+{
+	boost::lock_guard<boost::mutex> l(m_heartbeatmutex);
+	time_t now = time(0);
+	std::map<std::string, time_t >::iterator itt = m_componentheartbeats.find(component);
+	if (itt != m_componentheartbeats.end()) {
+		m_componentheartbeats.erase(itt);
 	}
 }
 

@@ -8,6 +8,34 @@
 
 class CDomoticzHardwareBase
 {
+public:
+	CDomoticzHardwareBase();
+	virtual ~CDomoticzHardwareBase();
+
+	bool Start();
+	bool Stop();
+	virtual void WriteToHardware(const char *pdata, const unsigned char length)=0;
+
+	void SetHeartbeatReceived();
+
+	void EnableOutputLog(const bool bEnableLog);
+
+	bool IsStarted() { return m_bIsStarted; }
+	time_t m_LastHeartbeat;
+	time_t m_LastHeartbeatReceive;
+	bool m_bSkipReceiveCheck;
+	int m_HwdID;
+	unsigned long m_DataTimeout;
+	std::string Name;
+	_eHardwareTypes HwdType;
+	unsigned char m_SeqNr;
+	unsigned char m_rxbufferpos;
+	bool m_bEnableReceive;
+	boost::signals2::signal<void(CDomoticzHardwareBase *pHardware, const unsigned char *pRXCommand)> sDecodeRXMessage;
+	boost::signals2::signal<void(CDomoticzHardwareBase *pDevice)> sOnConnected;
+	void *m_pUserData;
+	bool m_bOutputLog;
+private:
 	friend class C1Wire;
 	friend class CDummy;
 	friend class DomoticzTCP;
@@ -47,31 +75,7 @@ class CDomoticzHardwareBase
 	friend class MochadTCP;
 	friend class CPhilipsHue;
 	friend class CSonosPlugin;
-public:
-	CDomoticzHardwareBase();
-	virtual ~CDomoticzHardwareBase();
 
-	bool Start();
-	bool Stop();
-	virtual void WriteToHardware(const char *pdata, const unsigned char length)=0;
-
-	void SetHeartbeatReceived();
-
-	bool IsStarted() { return m_bIsStarted; }
-	time_t m_LastHeartbeat;
-	time_t m_LastHeartbeatReceive;
-	bool m_bSkipReceiveCheck;
-	int m_HwdID;
-	unsigned long m_DataTimeout;
-	std::string Name;
-	_eHardwareTypes HwdType;
-	unsigned char m_SeqNr;
-	unsigned char m_rxbufferpos;
-	bool m_bEnableReceive;
-	boost::signals2::signal<void(CDomoticzHardwareBase *pHardware, const unsigned char *pRXCommand)> sDecodeRXMessage;
-	boost::signals2::signal<void(CDomoticzHardwareBase *pDevice)> sOnConnected;
-	void *m_pUserData;
-private:
 	boost::mutex readQueueMutex;
 	virtual bool StartHardware()=0;
 	virtual bool StopHardware()=0;
@@ -84,6 +88,5 @@ private:
 	void Do_Heartbeat_Work();
 	boost::shared_ptr<boost::thread> m_Heartbeatthread;
 	volatile bool m_stopHeartbeatrequested;
-
 };
 
