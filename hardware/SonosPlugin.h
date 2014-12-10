@@ -32,7 +32,7 @@
 typedef struct __RendererDeviceData {
 	unsigned long		ip;
 	unsigned char		type;
-	unsigned char		level;
+	unsigned char		volume;
 	unsigned char		prev_state;
 	unsigned char		protocol;
 	bool				restore_state;
@@ -52,6 +52,7 @@ typedef struct __RendererDeviceData {
 typedef struct __ServerDeviceData {
 	unsigned long		ip;
 	int					type;
+	unsigned char		volume;
 	std::string			id;
 	std::string			udn;
 	std::string			name;
@@ -61,6 +62,18 @@ typedef struct __ServerDeviceData {
 #endif
 } ServerDeviceData;
 
+typedef struct __DeviceData {
+	unsigned long		ip;
+	int					type;
+	unsigned char		level;
+	std::string			id;
+	std::string			udn;
+	std::string			name;
+#if defined __linux__
+	GUPnPDeviceProxy	*device;
+	GUPnPServiceProxy   *service;
+#endif
+} DeviceData;
 
 #if defined WIN32 
 // Sorry No WIN32 support yet
@@ -76,16 +89,16 @@ public:
 	// Domoticz-->Hardware
 	void WriteToHardware(const char *pdata, const unsigned char length);
 	
-	// Hardware-->Domoticz
-	void UpdateValueEasy(int qType, const std::string& devId, const std::string& devName, const std::string& devValue, int level );
-	
+	// Update Renderer Value in Domoticz
+	void UpdateRendererValue( int qType, RendererDeviceData *upnpdevice, const std::string& devValue, int volume );
+	void UpdateSwitchValue( int qType, DeviceData *upnpdevice, const std::string& devValue, int level);
+
 	// Sonos UPnP AV specific public methods/actions
 	bool SonosActionPause(RendererDeviceData *upnpdevice);
 	bool SonosActionNext(RendererDeviceData *upnpdevice);
 	bool SonosActionPrevious(RendererDeviceData *upnpdevice);
 	bool SonosActionPlay(RendererDeviceData *upnpdevice);
 	bool SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri );
-	bool SonosActionSetNextURI(RendererDeviceData *upnpdevice, const std::string& uri );
 	bool SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, std::string& currenturi);
 	bool SonosActionGetTransportInfo(RendererDeviceData *upnpdevice, std::string& state);
 	bool SonosActionLeaveGroup(RendererDeviceData *upnpdevice);
@@ -93,6 +106,12 @@ public:
 	// Sonos UPnP Rendering Control specific public methods/actions
 	bool SonosActionSetVolume(RendererDeviceData *upnpdevice, int volume);
 	int  SonosActionGetVolume(RendererDeviceData *upnpdevice);
+
+	// Sonos UPnP Belkin WeMo actions
+#ifdef BELKIN
+	int SonosActionGetBinaryState(DeviceData *upnpdevice);
+	bool SonosActionSetBinaryState(DeviceData *upnpdevice, int state);
+#endif
 
 	// Sonos UPnP Content Directory
 	bool SonosActionSaveQueue(RendererDeviceData *upnpdevice);

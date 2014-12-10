@@ -3,6 +3,15 @@ R E A D M E
 
 This is a hardware plugin for the excellent Domoticz home automation system. Please visit Domoticz website http://www.domoticz.com for more info.
 
+Some use cases
+    - switch lights/amplifier on/off when music starts to play (and not the other way round!)
+    - complex wakeup/alarm scenarios (first soft music, later news, later switch music to the kitchen...)
+    - voice announcements (power consumption above threshold, front bell ringing, bathroom lights on for more than xxx...)
+
+Changes in v0.50
+    - Logs, logs, logs
+    - If TTS user variable starts with 0-, then, direct Google access is used.
+
 Changes in v0.49
     - Remerged with Domoticz v2145
     - Save queue before TTS announcement. Still not able to restore previous state.

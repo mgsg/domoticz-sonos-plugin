@@ -449,6 +449,8 @@ const char *RFX_Type_SubType_Desc(const unsigned char dType, const unsigned char
 		{ pTypeLighting2, sTypeAC, "AC" },
 		{ pTypeLighting2, sTypeHEU, "HomeEasy EU" },
 		{ pTypeLighting2, sTypeANSLUT, "Anslut" },
+		{ pTypeLighting2, sTypeSonos, "Sonos" },
+		{ pTypeLighting2, sTypeUPnP, "UPnP" },
 
 		{ pTypeLighting3, sTypeKoppla, "Ikea Koppla" },
 
@@ -970,6 +972,8 @@ void GetLightStatus(
 		case sTypeAC:
 		case sTypeHEU:
 		case sTypeANSLUT:
+		case sTypeSonos:
+		case sTypeUPnP:
 			bHaveDimmer=true;
 			maxDimLevel=16;
 			bHaveGroupCmd=true;

@@ -7953,6 +7953,14 @@ namespace http {
 								)
 								continue;
 						}
+						else if (rfilter == "upnp")
+						{
+							if (
+								(!((dType == pTypeLighting2) && (dSubType == sTypeSonos))) &&
+								(!((dType == pTypeLighting2) && (dSubType == sTypeUPnP)))
+								)
+								continue;
+						}
 					}
 
 					root["result"][ii]["HardwareID"] = hardwareID;

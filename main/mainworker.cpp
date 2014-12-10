@@ -3362,6 +3362,8 @@ unsigned long long MainWorker::decode_Lighting2(const CDomoticzHardwareBase *pHa
 		case sTypeAC:
 		case sTypeHEU:
 		case sTypeANSLUT:
+		case sTypeSonos:
+		case sTypeUPnP:
 			switch (pResponse->LIGHTING2.subtype)
 			{
 			case sTypeAC:
@@ -3373,6 +3375,12 @@ unsigned long long MainWorker::decode_Lighting2(const CDomoticzHardwareBase *pHa
 			case sTypeANSLUT:
 				WriteMessage("subtype       = ANSLUT");
 				break;
+			case sTypeSonos:										// Change for Sonos
+				WriteMessage("subtype       = Sonos");
+				break;			
+			case sTypeUPnP:
+				WriteMessage("subtype       = UPnP");
+				break;			
 			}
 			sprintf(szTmp,"Sequence nbr  = %d", pResponse->LIGHTING2.seqnbr);
 			WriteMessage(szTmp);
