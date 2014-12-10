@@ -107,7 +107,7 @@ public:
 	bool SonosActionSetVolume(RendererDeviceData *upnpdevice, int volume);
 	int  SonosActionGetVolume(RendererDeviceData *upnpdevice);
 
-	// Sonos UPnP Belkin WeMo actions
+	// Sonos UPnP Belkin WeMo actions @@@
 #ifdef BELKIN
 	int SonosActionGetBinaryState(DeviceData *upnpdevice);
 	bool SonosActionSetBinaryState(DeviceData *upnpdevice, int state);
@@ -146,7 +146,7 @@ private:
 #elif defined __linux__
 	// GUPnP internal state
 	GUPnPContext *context;
-	GUPnPControlPoint *cpmr, *cpms;
+	GUPnPControlPoint *cpmr, *cpms, *cpbw;
 #endif
 };
 

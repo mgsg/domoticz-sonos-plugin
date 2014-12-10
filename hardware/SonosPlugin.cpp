@@ -444,13 +444,13 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 				switch (upnpdevice->protocol) {
 				case UPNP_SONOS_SOURCE_QUEUE:
 					// d) Save Queue / State
-					SonosActionSaveQueue(upnpdevice);
+//					SonosActionSaveQueue(upnpdevice);
 
 					// Set current and next URI and play - UNLINK!
 					SonosActionSetURI(upnpdevice, sURL );
 
 					// Restore session
-					upnpdevice->restore_state = true;
+//					upnpdevice->restore_state = true;
 					break;
 				case UPNP_SONOS_SOURCE_LINEIN:
 				case UPNP_SONOS_SOURCE_RADIO:
@@ -464,7 +464,6 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 
 				// Set current and next URI and play - UNLINK!
 				SonosActionSetURI(upnpdevice, sURL );
-
 				SonosActionPlay(upnpdevice);
 			}
 
@@ -2302,13 +2301,17 @@ std::string helperGetUserVariable(const std::string &name)
 			// Text prepended with "0-" means direct Google Translate mp3 URL
 			method = 0;
 			sCleanText = sText.substr(2,std::string::npos);		
+
+#ifdef _DEBUG
+		_log.Log(LOG_NORM,"(Sonos) Say direct");
+#endif
 		} else if (sText.compare(0, 2, "1-") == 0) {
 			// Text prepended with "1-" means Domoticz-served mp3 through URL
 			method = 1;
 			sCleanText = sText.substr(2,std::string::npos);		
 		} else if (sText.compare(0, 2, "2-") == 0) {
 			// Text prepended with "2-" means m3u file served by Domoticz, but directs to Google URL
-			method = 1;
+			method = 2;
 			sCleanText = sText.substr(2,std::string::npos);		
 		} else {
 			// No "n-" prefix means Domoticz-served URL
@@ -2331,8 +2334,8 @@ std::string helperGetUserVariable(const std::string &name)
 			// SONOS: ok from Sonos manager creating a radio with http:// - on logs has been transformed to x-rincon-mp3radio
 			// XBMC: ERROR: Sink DIRECTSOUND:{5164DEFA-341A-4CF8-A514-59DA4A1E915B} returned invalid buffer size: 240
 
-			ssURL.clear();
-			ssURL.str("");
+//			ssURL.clear();
+//			ssURL.str("");
 //			ssURL << "stack://" << sURLTTS;
 			url = sURLTTS;
 		} else if (method == 2) {
@@ -2416,19 +2419,24 @@ std::string helperGetUserVariable(const std::string &name)
 		_log.Log(LOG_NORM,"(Sonos) SonosInit host IP %s", m_host_ip.c_str());        
 
         /* Create Control Points targeting UPnP AV MediaRenderer and MediaServer devices */
-        cpmr = gupnp_control_point_new(context, UPNP_DEVICE_MEDIARENDERER);	 // "upnp:rootdevice");	//   // UPNP_DEVICES_ALL    cpms = gupnp_control_point_new(context, UPNP_DEVICE_MEDIASERVER);	 
+        cpmr = gupnp_control_point_new(context, UPNP_DEVICE_MEDIARENDERER);	 // "upnp:rootdevice");	//   // UPNP_DEVICES_ALL    
+		cpms = gupnp_control_point_new(context, UPNP_DEVICE_MEDIASERVER);	 
+		cpbw = gupnp_control_point_new(context, UPNP_DEVICE_BELKINWEMO);	 
 
         /* The device-proxy-available signal is emitted when target devices are found - connect to it */
         g_signal_connect (cpmr, "device-proxy-available", G_CALLBACK (callbackDeviceDiscovered), NULL);
         g_signal_connect (cpms, "device-proxy-available", G_CALLBACK (callbackDeviceDiscovered), NULL);
+        g_signal_connect (cpbw, "device-proxy-available", G_CALLBACK (callbackDeviceDiscovered), NULL);
 
         /* The device-proxy-unavailable signal is emitted when target devices are removed - connect to it */
         g_signal_connect( cpmr, "device-proxy-unavailable", G_CALLBACK (callbackDeviceUnavailable), NULL);
         g_signal_connect( cpms, "device-proxy-unavailable", G_CALLBACK (callbackDeviceUnavailable), NULL);
+        g_signal_connect( cpbw, "device-proxy-unavailable", G_CALLBACK (callbackDeviceUnavailable), NULL);
         
         /* Tell the Control Points to start searching */
         gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpmr), TRUE);
         gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpms), TRUE);
+        gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpbw), TRUE);
         
         /* Set a timeout of RUN_TIME seconds to do some things */
 		g_timeout_add_seconds( RUN_TIME, callbackTimeout, NULL);
