@@ -10,7 +10,8 @@ Some use cases
 
 Changes in v0.50
     - Logs, logs, logs
-    - If TTS user variable starts with 0-, then, direct Google access is used.
+    - If TTS user variable starts with 0-, then, direct Google access url is used for text-to-speech mp3. If not, Domoticz WebServer.
+    - Initial experimental support for Belkin WeMo switch
 
 Changes in v0.49
     - Remerged with Domoticz v2145
