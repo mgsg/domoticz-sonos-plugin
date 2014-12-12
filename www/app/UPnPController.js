@@ -48,7 +48,7 @@ define(['app'], function (app) {
 		  var id="";
 
 		  $.ajax({
-			 url: "json.htm?type=devices&filter=upnp&used=true&order=Name&lastupdate="+$.LastUpdateTime,
+			 url: "/media/upnp.json",
 			 async: false, 
 			 dataType: 'json',
 			 success: function(data) {
@@ -145,8 +145,9 @@ define(['app'], function (app) {
 				'\t</table>\n';
 		  
 		  var i=0;
+		  var j=0;
 		  $.ajax({
-			 url: "json.htm?type=devices&filter=upnp&used=true&order=Name", 
+			 url: "/media/upnp.json", 
 			 async: false, 
 			 dataType: 'json',
 			 success: function(data) {
@@ -171,8 +172,10 @@ define(['app'], function (app) {
 				
 				bAllowWidgetReorder=data.AllowWidgetOrdering;
 
-				$.each(data.result, function(i,item){
-				  if (i % 3 == 0)
+				$.each(data.result, function(i,item){			  
+				  if (item.Unit == "0") {
+
+				  if (j % 3 == 0)
 				  {
 					//add devider
 					if (bHaveAddedDevider == true) {
@@ -182,7 +185,8 @@ define(['app'], function (app) {
 					htmlcontent+='<div class="row divider">\n';
 					bHaveAddedDevider=true;
 				  }
-				  
+				  j++;
+
 				  var xhtm=
 						'\t<div class="span4" id="' + item.idx + '">\n' +
 						'\t  <section>\n' +
@@ -205,26 +209,24 @@ define(['app'], function (app) {
 						}
 						xhtm+='\t      <td id="name" style="background-color: ' + nbackcolor + ';">' + item.Name + '</td>\n';
 						xhtm+='\t      <td id="bigtext">';
-						if (item.SubType == "Sonos") {
-						  xhtm+=item.Data;
-						} else if (item.SubType == "UPnP") {
-						  xhtm+=item.Data;
-						} 
+					    xhtm+=item.Data;
 						xhtm+='</td>\n';
-				  xhtm+='\t      <td id="img"><img src="images/';
-					var status="";
-					if (item.SubType == "UPnP") {
-					  xhtm+='Fan48_On.png" height="48" width="48"></td>\n';
-					  status=item.Data;
-					}
-					else if (item.SubType == "Sonos") {
-					  xhtm+='text48.png" height="48" width="48"></td>\n';
-					  status=item.Data;
-					}
+						xhtm+='\t      <td id="img">';
+						var status="";
+
+						if (item.InternalState=="On") {
+							xhtm+='<img src="images/hold.png" title="' + $.i18n("Turn Off") + '" onclick="SwitchLight(' + item.idx + ',\'On\',RefreshLights,' + item.Protected +');" class="lcursor" height="48" width="48">';
+							status="Playing";
+						} else {
+							xhtm+='<img src="images/program.png" title="' + $.i18n("Turn On") + '" onclick="SwitchLight(' + item.idx + ',\'On\',RefreshLights,' + item.Protected +');" class="lcursor" height="48" width="48">';
+							status="Stopped";
+						}
+
 					xhtm+=      
 						'\t      <td id="status">' + status + '</td>\n' +
 						'\t      <td id="lastupdate">' + item.LastUpdate + '</td>\n' +
 						'\t      <td id="type">' + item.Type + ', ' + item.SubType + '</td>\n' +
+						'\t      <td id="presets"><img src="images/Speaker48_On.png" height="24" width="24"><img src="images/lux48.png" height="24" width="24"></td>\n' +
 						'\t      <td>';
 				  if (item.Favorite == 0) {
 					xhtm+=      
@@ -235,26 +237,12 @@ define(['app'], function (app) {
 						  '<img src="images/favorite.png" title="' + $.i18n('Remove from Dashboard') +'" onclick="MakeFavorite(' + item.idx + ',0);" class="lcursor">&nbsp;&nbsp;&nbsp;&nbsp;';
 				  }
 
-				  if (item.Type == "Sonos") {
-					xhtm+='<a class="btnsmall" onclick="ShowFanLog(\'#upnpcontent\',\'ShowUPnPs\',' + item.idx + ',\'' + item.Name + '\');" data-i18n="Log">Log</a> ';
-					if (permissions.hasPermission("Admin")) {
-						xhtm+='<a class="btnsmall" onclick="EditUPnPDevice(' + item.idx + ',\'' + item.Name + '\');" data-i18n="Edit">Edit</a> ';
-					}
+				  if (permissions.hasPermission("Admin")) {
+					xhtm+='<a class="btnsmall" onclick="EditUPnPDevice(' + item.idx + ',\'' + item.Name + '\');" data-i18n="Edit">Edit</a> ';
 				  }
-				  else {
-					xhtm+='<a class="btnsmall" onclick="ShowFanLog(\'#upnpcontent\',\'ShowUPnPs\',' + item.idx + ',\'' + item.Name + '\');" data-i18n="Log">Log</a> ';				  	
-					if (permissions.hasPermission("Admin")) {
-						xhtm+='<a class="btnsmall" onclick="EditUPnPDevice(' + item.idx + ',\'' + item.Name + '\');" data-i18n="Edit">Edit</a> ';
-					}
-				  }
-				  if (item.ShowNotifications == true) {
-					  if (permissions.hasPermission("Admin")) {
-						  if (item.Notifications == "true")
-							xhtm+='<a class="btnsmall-sel" onclick="ShowNotifications(' + item.idx + ',\'' + item.Name + '\', \'#upnpcontent\', \'ShowUPnPs\');" data-i18n="Notifications">Notifications</a>';
-						  else
-							xhtm+='<a class="btnsmall" onclick="ShowNotifications(' + item.idx + ',\'' + item.Name + '\', \'#upnpcontent\', \'ShowUPnPs\');" data-i18n="Notifications">Notifications</a>';
-					  }
-				  }
+				  xhtm+='<a class="btnsmall" onclick="ShowFanLog(\'#upnpcontent\',\'ShowUPnPs\',' + item.idx + ',\'' + item.Name + '\');" data-i18n="TTS">TTS</a> ';
+				  xhtm+='<a class="btnsmall" onclick="ShowNotifications(' + item.idx + ',\'' + item.Name + '\', \'#upnpcontent\', \'ShowUPnPs\');" data-i18n="Preset 1">Preset 1</a>';
+				  xhtm+='<a class="btnsmall" onclick="ShowNotifications(' + item.idx + ',\'' + item.Name + '\', \'#upnpcontent\', \'ShowUPnPs\');" data-i18n="Preset 2">Preset 2</a>';
 				  xhtm+=      
 						'</td>\n' +
 						'\t    </tr>\n' +
@@ -262,6 +250,7 @@ define(['app'], function (app) {
 						'\t  </section>\n' +
 						'\t</div>\n';
 				  htmlcontent+=xhtm;
+				}
 				});
 			  }
 			 }

@@ -34,7 +34,7 @@ typedef struct __RendererDeviceData {
 	unsigned char		type;
 	unsigned char		volume;
 	unsigned char		prev_state;
-	unsigned char		protocol;
+	unsigned char		source;
 	bool				restore_state;
 	std::string			id;
 	std::string			udn;
@@ -145,8 +145,10 @@ private:
 
 #elif defined __linux__
 	// GUPnP internal state
-	GUPnPContext *context;
-	GUPnPControlPoint *cpmr, *cpms, *cpbw;
+	GUPnPContext						*context;
+	GUPnPControlPoint					*cpmr;
+	GUPnPControlPoint					*cpms;
+	GUPnPControlPoint					*cpbw;
 #endif
 };
 

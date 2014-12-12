@@ -8,6 +8,11 @@ Some use cases
     - complex wakeup/alarm scenarios (first soft music, later news, later switch music to the kitchen...)
     - voice announcements (power consumption above threshold, front bell ringing, bathroom lights on for more than xxx...)
 
+Changes in v0.51
+    - Debug logs still activated
+    - Bug in TTS possibly corrected: If user variable starts with 0-, then, direct Google access url is used for text-to-speech mp3. If not, Domoticz WebServer.
+    - Initial experimental specific tab view for UPnP devices, still with no functionality other than Play/Pause: http://yourip:8080/#/UPnP
+
 Changes in v0.50
     - Logs, logs, logs
     - If TTS user variable starts with 0-, then, direct Google access url is used for text-to-speech mp3. If not, Domoticz WebServer.
