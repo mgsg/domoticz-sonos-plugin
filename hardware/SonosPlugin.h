@@ -94,9 +94,7 @@ public:
 	void UpdateSwitchValue( int qType, DeviceData *upnpdevice, const std::string& devValue, int level);
 
 	// Sonos UPnP AV specific public methods/actions
-	bool SonosActionPause(RendererDeviceData *upnpdevice);
-	bool SonosActionNext(RendererDeviceData *upnpdevice);
-	bool SonosActionPrevious(RendererDeviceData *upnpdevice);
+	bool SonosAction(RendererDeviceData *upnpdevice, std::string action);
 	bool SonosActionPlay(RendererDeviceData *upnpdevice);
 	bool SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri );
 	bool SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, std::string& currenturi);

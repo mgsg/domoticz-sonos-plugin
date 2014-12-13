@@ -352,7 +352,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 		if (pCmd->LIGHTING2.unitcode == UNIT_Sonos_PlayPause ) {
 			if (pCmd->LIGHTING2.cmnd==sonos_sPause) {
 				// STOP
-				SonosActionPause( upnpdevice );
+				SonosAction( upnpdevice, "Pause" );
 
 				// Save in device level the last known volume
 //				upnpdevice->volume	= SonosActionGetVolume( upnpdevice  );
@@ -1163,40 +1163,41 @@ std::string helperGetUserVariable(const std::string &name)
 
 				/* Get AVTransport service for device */
 				upnpdevice->renderer = deviceproxy;
+
+				/* Obtain extra device data */
+				std::string brand, model, name;
+				thisInstance->SonosGetDeviceData(upnpdevice, brand, model, name);
+				_log.Log(LOG_NORM,"(Sonos) %s Discovered Br[%s] Mod[%s]", upnpdevice->name.c_str(), brand.c_str(), model.c_str());
+				upnpdevice->name = name;
+
+				/* Add device to list of current devices */
+				renderersmap.insert(RenderersMap::value_type(std::string(upnpdevice->id), upnpdevice));
+				upnpdevicesmap.insert(UPnPDevicesMap::value_type(std::string(upnpdevice->udn), upnpdevice->id));
+
+				/* Add a Play/Pause/Volume device for each Sonos speaker */
+				thisInstance->UpdateRendererValue(UNIT_Sonos_PlayPause, upnpdevice, "0", NO_VOLUME_CHANGE);
+
+				/* Add Say and Preset pushbutton for each Sonos speaker */
+				thisInstance->UpdateRendererValue(UNIT_Sonos_Say, upnpdevice, "0", NO_VOLUME_CHANGE);
+				thisInstance->UpdateRendererValue(UNIT_Sonos_Preset1, upnpdevice, "0", NO_VOLUME_CHANGE);
+				thisInstance->UpdateRendererValue(UNIT_Sonos_Preset2, upnpdevice, "0", NO_VOLUME_CHANGE);
+
+				// Add Temp sensor for PLAY:1
+				if (upnpdevice->type == UPNP_TYPE_PLAY1) {
+					std::string temperature;
+					if (thisInstance->SonosActionGetPlay1Temperature(upnpdevice, temperature) != false)	
+						thisInstance->UpdateRendererValue(UNIT_Sonos_TempPlay1, upnpdevice, temperature, NO_VOLUME_CHANGE);
+				}
+
+				/* Add "LastChange" to the list of states we want to be notified about and turn on event subscription */
 				upnpdevice->av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(info, UPNP_SRV_AV_TRANSPORT));
-				if (upnpdevice->av_transport == NULL) {
-					_log.Log(LOG_ERROR,"(Sonos) No AV_TRANSPORT for %x", longIP);
-				} else {
-					/* Obtain extra device data */
-					std::string brand, model, name;
-					thisInstance->SonosGetDeviceData(upnpdevice, brand, model, name);
-					_log.Log(LOG_NORM,"(Sonos) %s Discovered Br[%s] Mod[%s]", upnpdevice->name.c_str(), brand.c_str(), model.c_str());
-					upnpdevice->name = name;
-
-					/* Add device to list of current devices */
-					renderersmap.insert(RenderersMap::value_type(std::string(upnpdevice->id), upnpdevice));
-					upnpdevicesmap.insert(UPnPDevicesMap::value_type(std::string(upnpdevice->udn), upnpdevice->id));
-
-					/* Add a Play/Pause/Volume device for each Sonos speaker */
-					thisInstance->UpdateRendererValue(UNIT_Sonos_PlayPause, upnpdevice, "0", NO_VOLUME_CHANGE);
-
-					/* Add Say and Preset pushbutton for each Sonos speaker */
-					thisInstance->UpdateRendererValue(UNIT_Sonos_Say, upnpdevice, "0", NO_VOLUME_CHANGE);
-					thisInstance->UpdateRendererValue(UNIT_Sonos_Preset1, upnpdevice, "0", NO_VOLUME_CHANGE);
-					thisInstance->UpdateRendererValue(UNIT_Sonos_Preset2, upnpdevice, "0", NO_VOLUME_CHANGE);
-
-					// Add Temp sensor for PLAY:1
-					if (upnpdevice->type == UPNP_TYPE_PLAY1) {
-						std::string temperature;
-						if (thisInstance->SonosActionGetPlay1Temperature(upnpdevice, temperature) != false)	
-							thisInstance->UpdateRendererValue(UNIT_Sonos_TempPlay1, upnpdevice, temperature, NO_VOLUME_CHANGE);
-					}
-
-					/* Add "LastChange" to the list of states we want to be notified about and turn on event subscription */
+				if (upnpdevice->av_transport != NULL) {
 					if (gupnp_service_proxy_add_notify( upnpdevice->av_transport,
 						"LastChange", G_TYPE_STRING, callbackLastChange,
 						NULL))
 						gupnp_service_proxy_set_subscribed (upnpdevice->av_transport, TRUE);
+				} else {
+					_log.Log(LOG_ERROR,"(Sonos) No AV_TRANSPORT for %x", longIP);
 				}
 			}
 		} else if (deviceType == UPNP_MEDIASERVER) {
@@ -1636,76 +1637,43 @@ std::string helperGetUserVariable(const std::string &name)
     /*+------------------------------------------------------------------------+*/
 
     /*+------------------------------------------------------------------------+*/
-    /*| UPnP Action method to pause AVT Transport on device.                   |*/
+    /*| UPnP AV Transport Action method.                                       |*/
+    /*| Action possible values:                                                |*/
+    /*| - Pause                                                                |*/
+    /*| - Previous/Next                                                        |*/
+    /*| - BecomeCoordinatorOfStandaloneGroup                                   |*/
+    /*|   For linked zones, the commands have to be sent to the coordinator.   |*/
+    /*|   BecomeCoordinatorOfStandaloneGroup is ~ "Leave Group".               |*/
+    /*|   To join a group set AVTransportURI to x-rincon:<udn>.                |*/
     /*+------------------------------------------------------------------------+*/
-	bool CSonosPlugin::SonosActionPause(RendererDeviceData *upnpdevice) {
-		 GError *error = NULL;
-		 gboolean success;
+	bool CSonosPlugin::SonosAction(RendererDeviceData *upnpdevice, std::string action) {
+		GError *error = NULL;
+		bool success=false;
 
-		 /* Send action */
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Pause", &error,
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) %s error getting AV_TRANSPORT for %s", action.c_str(), upnpdevice->name.c_str());
+			return false;
+		}
+
+		/* Send action */
+		success = (bool)gupnp_service_proxy_send_action (av_transport, action.c_str(), &error,
 													"InstanceID", G_TYPE_UINT, 0, NULL,
 													NULL);
 		if (!success) {
 			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) Pause error %s", error->message);
+				_log.Log(LOG_ERROR,"(Sonos) %s error %d %s", action.c_str(), error->code, error->message);
 				g_error_free (error);
-			}
+			} else 
+				_log.Log(LOG_ERROR,"(Sonos) %s error no AV_TRANSPORT", action.c_str());
 			return false;
 		}
 
 #ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) Pause success!");
-#endif
-		return true;
-	}
-
-    /*+------------------------------------------------------------------------+*/
-    /*| UPnP AV Transport Action method to play next track on device.          |*/
-    /*+------------------------------------------------------------------------+*/
-	bool CSonosPlugin::SonosActionNext(RendererDeviceData *upnpdevice) {
-		 GError *error = NULL;
-		 gboolean success;
-
-		 /* Send action */
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Next", &error,
-													"InstanceID", G_TYPE_UINT, 0, NULL,
-													NULL);
-		if (!success) {
-			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) Next error %s", error->message);
-				g_error_free (error);
-				return false;
-			}
-		}
-
-#ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) Next success!");
-#endif
-		return true;
-	}
-
-    /*+------------------------------------------------------------------------+*/
-    /*| UPnP AV Transport Action method to play previous track on device.      |*/
-    /*+------------------------------------------------------------------------+*/
-	bool CSonosPlugin::SonosActionPrevious(RendererDeviceData *upnpdevice) {		 
-		 GError *error = NULL;
-		 gboolean success;
-
-		 /* Send action */
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Previous", &error,
-													"InstanceID", G_TYPE_UINT, 0, NULL,
-													NULL);
-		if (!success) {
-			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) Prev error %s", error->message);
-				g_error_free (error);
-				return false;
-			}
-		}
-
-#ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) Prev success!");
+		_log.Log(LOG_NORM,"(Sonos) %s success!", action.c_str());
 #endif
 		return true;
 	}
@@ -1714,22 +1682,34 @@ std::string helperGetUserVariable(const std::string &name)
     /*| UPnP Action method to play AVT Transport on device.                    |*/
     /*+------------------------------------------------------------------------+*/
 	bool CSonosPlugin::SonosActionPlay(RendererDeviceData *upnpdevice) {
-		 GError *error = NULL;
-		 gboolean success;
+		GError *error = NULL;
+		bool success=false;
 
 #ifdef _DEBUG_2
 		_log.Log(LOG_NORM,"(Sonos) Play ->");
 #endif
 
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) Play error getting AV_TRANSPORT for %s", upnpdevice->name.c_str());
+			return false;
+		}
+
 		/* Send action */
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "Play", &error,
+		success = (bool)gupnp_service_proxy_send_action (av_transport, "Play", &error,
 													"InstanceID", G_TYPE_UINT, 0,
 													"Speed", G_TYPE_UINT, 1,
 													NULL,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) Play error %d %s", error, error->message);
-		    g_error_free (error);
+			if (error) {
+				_log.Log(LOG_ERROR,"(Sonos) Play error %d %s", error->code, error->message);
+				g_error_free (error);
+			} else
+				_log.Log(LOG_ERROR,"(Sonos) Play error no AV_TRANSPORT");
 			return false;
 		}
 #ifdef _DEBUG
@@ -1743,8 +1723,17 @@ std::string helperGetUserVariable(const std::string &name)
     /*+------------------------------------------------------------------------+*/
 	bool CSonosPlugin::SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri ) {
 		GError *error;
-		gboolean success;
+		bool success=false;
 		std::string metadata;
+
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) SetURI error getting AV_TRANSPORT for %s", upnpdevice->name.c_str());
+			return false;
+		}
 
 		/* Build metadata, this is very hacky but is good to show raw data */
 		std::string metadata1("&lt;DIDL-Lite xmlns:dc=&quot;http://purl.org/dc/elements/1.1/&quot;"
@@ -1769,19 +1758,20 @@ std::string helperGetUserVariable(const std::string &name)
 		}
 		metadata = temp.str();
 
-		 /* Send action */
-		success = gupnp_service_proxy_send_action( upnpdevice->av_transport, "SetAVTransportURI", &error,
-			"InstanceID", G_TYPE_UINT, 0,
-			"CurrentURI", G_TYPE_STRING, uri.c_str(),
-			"CurrentURIMetaData", G_TYPE_STRING, metadata.c_str(), 
-			NULL,
-			NULL);
+		/* Send action */
+		success = (bool)gupnp_service_proxy_send_action( av_transport, "SetAVTransportURI", &error,
+				"InstanceID", G_TYPE_UINT, 0,
+				"CurrentURI", G_TYPE_STRING, uri.c_str(),
+				"CurrentURIMetaData", G_TYPE_STRING, metadata.c_str(), 
+				NULL,
+				NULL);
 		if (!success) {
 			if (error) {
 				_log.Log(LOG_ERROR,"(Sonos) SetURI Error %d. Msg: %s", error->code, error->message);
 				g_error_free (error);
-				return false;
-			}
+			} else
+				_log.Log(LOG_ERROR,"(Sonos) SetURI no AV_TRANSPORT");
+			return false;
 		}
 #ifdef _DEBUG
 		_log.Log(LOG_NORM,"(Sonos) SetURI Ok playing %s", uri.c_str());
@@ -1790,45 +1780,26 @@ std::string helperGetUserVariable(const std::string &name)
 	}
 
     /*+------------------------------------------------------------------------+*/
-    /*| UPnP AV Transport Action method to leave group.                        |*/
-    /*| For linked zones, the commands have to be sent to the coordinator.     |*/
-    /*| BecomeCoordinatorOfStandaloneGroup is ~ "Leave Group".                 |*/
-    /*| To join a group set AVTransportURI to x-rincon:<udn>.                  |*/
-    /*+------------------------------------------------------------------------+*/
-	bool CSonosPlugin::SonosActionLeaveGroup(RendererDeviceData *upnpdevice) {		 
-		 GError *error = NULL;
-		 gboolean success;
-
-		 /* Send action */
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "BecomeCoordinatorOfStandaloneGroup", &error,
-													"InstanceID", G_TYPE_UINT, 0, NULL,
-													NULL);
-		if (!success) {
-			if (error) {
-				_log.Log(LOG_ERROR,"(Sonos) Leave group error %s", error->message);
-				g_error_free (error);
-				return false;
-			}
-		}
-
-#ifdef _DEBUG
-		_log.Log(LOG_NORM,"(Sonos) Leave group success!");
-#endif
-		return true;
-	}
-
-    /*+------------------------------------------------------------------------+*/
     /*| UPnP AV Action method to Get Transport Info for device.                |*/
     /*+------------------------------------------------------------------------+*/
 	bool CSonosPlugin::SonosActionGetTransportInfo(RendererDeviceData *upnpdevice, std::string& state) {
-		 GError *error = NULL;
-		 gboolean success;
+		GError *error = NULL;
+		bool success=false;
+		char *CurrentTransportState;
+		char *CurrentTransportStatus;
+		char *CurrentSpeed;
 
-		 /* Send action */
-		 char *CurrentTransportState;
-		 char *CurrentTransportStatus;
-		 char *CurrentSpeed;
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetTransportInfo", &error,
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) GetTransportInfo error getting AV_TRANSPORT for %s", upnpdevice->name.c_str());
+			return false;
+		}
+
+		/* Send action */
+		success = (bool)gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetTransportInfo", &error,
 													"InstanceID", G_TYPE_UINT, 0, 
 													NULL,
 													"CurrentTransportState", G_TYPE_STRING, &CurrentTransportState,
@@ -1836,7 +1807,11 @@ std::string helperGetUserVariable(const std::string &name)
 													"CurrentSpeed", G_TYPE_STRING, &CurrentSpeed,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) GetTransportInfo error %s", error->message);
+			if (error) {
+				_log.Log(LOG_ERROR,"(Sonos) GetTransportInfo Error %d. Msg: %s", error->code, error->message);
+				g_error_free (error);
+			} else
+				_log.Log(LOG_ERROR,"(Sonos) GetTransportInfo no AV_TRANSPORT");
 			return false;
 		}
 
@@ -1855,16 +1830,25 @@ std::string helperGetUserVariable(const std::string &name)
     /*+------------------------------------------------------------------------+*/
 	bool CSonosPlugin::SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, 
 		std::string& currenturi) {
-		 GError *error = NULL;
-		 gboolean success;
+		GError *error = NULL;
+		bool success=false;
+		char *CurrentTrack;
+		char *CurrentTrackDuration;
+		char *CurrentTrackMetaData;
+		char *CurrentTrackURI;
+		int RelativeTimePosition, AbsoluteTimePosition, RelativeCounterPosition, AbsoluteCounterPosition;
 
-		 /* Send action */
-		 char *CurrentTrack;
-		 char *CurrentTrackDuration;
-		 char *CurrentTrackMetaData;
-		 char *CurrentTrackURI;
-		 int RelativeTimePosition, AbsoluteTimePosition, RelativeCounterPosition, AbsoluteCounterPosition;
-		 success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetPositionInfo", &error,
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) GetPositionInfo error getting AV_TRANSPORT for %s", upnpdevice->name.c_str());
+			return false;
+		}
+
+		/* Send action */
+		success = (bool)gupnp_service_proxy_send_action (upnpdevice->av_transport, "GetPositionInfo", &error,
 													"InstanceID", G_TYPE_UINT, 0, 
 													NULL,
 													"Track", G_TYPE_STRING, &CurrentTrack,
@@ -1877,7 +1861,11 @@ std::string helperGetUserVariable(const std::string &name)
 													"AbsCount", G_TYPE_UINT, &AbsoluteCounterPosition,
 													NULL);
 		if (!success) {
-			_log.Log(LOG_ERROR,"(Sonos) GetPositionInfo error %s", error->message);
+			if (error) {
+				_log.Log(LOG_ERROR,"(Sonos) GetPositionInfo Error %d. Msg: %s", error->code, error->message);
+				g_error_free (error);
+			} else
+				_log.Log(LOG_ERROR,"(Sonos) GetPositionInfo no AV_TRANSPORT");
 			return false;
 		}
 
@@ -2004,7 +1992,7 @@ std::string helperGetUserVariable(const std::string &name)
 		 GUPnPServiceProxy *rendering_control;
 		 rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
                        UPNP_SRV_RENDERING_CONTROL));
-		 if (rendering_control == 0) {
+		 if (rendering_control == NULL) {
 			_log.Log(LOG_ERROR,"(Sonos) GetVolume error getting rendering control for device %s", upnpdevice->name.c_str());
 			return NO_VOLUME_CHANGE;
 		 }
@@ -2174,29 +2162,35 @@ std::string helperGetUserVariable(const std::string &name)
     /*+------------------------------------------------------------------------+*/
 	bool CSonosPlugin::SonosActionSaveQueue(RendererDeviceData *upnpdevice) {
 		GError *error = NULL;
-		gboolean success;
+		bool success=false;
+
+		/* Get AV_TRANSPORT service for device */
+		GUPnPServiceProxy *av_transport;
+		av_transport = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+                       UPNP_SRV_AV_TRANSPORT));
+		if (av_transport == NULL) {
+			_log.Log(LOG_ERROR,"(Sonos) SaveQueue error getting AV_TRANSPORT for %s", upnpdevice->name.c_str());
+			return false;
+		}
 
 		/* Send action */
-		if (upnpdevice->av_transport == NULL) {
-			_log.Log(LOG_ERROR,"(Sonos) SaveQueue av_transport (null) for %s", upnpdevice->name.c_str());
-		} else {
-			success = gupnp_service_proxy_send_action (upnpdevice->av_transport, "SaveQueue", &error,
+		success = (bool)gupnp_service_proxy_send_action (av_transport, "SaveQueue", &error,
 				"InstanceID", G_TYPE_UINT, 0, 
 				"Title", G_TYPE_STRING, SONOS_SAVED_QUEUE_NAME, 
 				"ObjectID", G_TYPE_STRING, NULL,
 				NULL,
 				NULL);
 			if (!success) {
-				_log.Log(LOG_ERROR,"(Sonos) SaveQueue error %d %s", error, error->message);
-				g_error_free (error);
+				if (error) {
+					_log.Log(LOG_ERROR,"(Sonos) SaveQueue error %d %s", error->code, error->message);
+					g_error_free (error);
+				} else
+					_log.Log(LOG_ERROR,"(Sonos) SaveQueue error");
 				return false;
 			}
-
 #ifdef _DEBUG
 			_log.Log(LOG_NORM,"(Sonos) SaveQueue for %s", upnpdevice->name.c_str());
 #endif
-		}
-
 		return true;
 	}
 
