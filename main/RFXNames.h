@@ -24,6 +24,7 @@ enum _eSwitchType
 	STYPE_VenetianBlindsUS,	//14
 	STYPE_VenetianBlindsEU,	//15
 	STYPE_BlindsPercentageInverted, //16
+	STYPE_UPnP,				//17 - UPnP / Sonos	
 	STYPE_END
 };
 

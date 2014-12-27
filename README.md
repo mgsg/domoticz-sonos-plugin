@@ -8,6 +8,12 @@ Some use cases
     - complex wakeup/alarm scenarios (first soft music, later news, later switch music to the kitchen...)
     - voice announcements (power consumption above threshold, front bell ringing, bathroom lights on for more than xxx...)
 
+Changes in v0.52
+    - Code refactored from it's C origin to a more OO paradigm. 
+    - Delete devices from last version! Now only one device for each MediaRenderer device (speaker, TV, Kodi...)
+    - Upgraded Json API with specific commands for UPnP devices
+    - New UI tab for UPnP devices. 
+
 Changes in v0.51
     - Debug logs still activated
     - Bug in TTS possibly corrected: If user variable starts with 0-, then, direct Google access url is used for text-to-speech mp3. If not, Domoticz WebServer.

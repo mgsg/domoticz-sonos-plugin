@@ -29,38 +29,71 @@
 #include <libsoup/soup.h>
 #endif
 
-typedef struct __RendererDeviceData {
-	unsigned long		ip;
-	unsigned char		type;
-	unsigned char		volume;
-	unsigned char		prev_state;
-	unsigned char		source;
-	bool				restore_state;
-	std::string			id;
-	std::string			udn;
-	std::string			name;
-	std::string			prev_uri;	
-	std::string			coordinator;
+class UPnPDevice {
+public:
+	unsigned long		ip;					// Long conversion of IP address
+	unsigned char		type;				// Type of device - Sonos, UPnP,...
+	unsigned char		volume;				// The speaker's volume
+	unsigned char		prev_state;			// Previous state
+	unsigned char		source;				// Source of media being played
+	bool				restore_state;		// State restore pending from previous interruption
+
+	bool				mute;				// The speaker's mute status
+	unsigned char		bass;				// The speaker's bass EQ
+	unsigned char		treble;				// The speaker's treble EQ
+	unsigned char		loudness;			// The status of the speaker's loudness compensation
+	unsigned char		cross_fade;			// The status of the speaker's crossfade
+	unsigned char		status_light;		// The state of the Sonos status light
+	unsigned char		play_mode;			// The queue's repeat/shuffle settings
+	unsigned char		queue_size;			// Get size of queue
+
+	std::string			id;					// String representation of long conversion of IP address
+	std::string			udn;				// uid -- The speaker's unique identifier
+	std::string			name;				// player_name  -- The speaker's name
+
+	std::string			prev_uri;			// Previously played uri - to be moved to snapshot class???
+	std::string			coordinator;		// Zone Coordinator uri/udn
+
+	std::string			title;				// Currently played title
+	std::string			artist;				// Currently played artist
+	std::string			album;				// Currently played album
+	std::string			album_art;			// Currently played album_art
+	std::string			device_icon;		// Device icon
+
+	// Interface defined public constructor and methods
+	UPnPDevice(void);
+	~UPnPDevice(void);
+
+	bool GetDeviceData(std::string& brand, std::string& model, std::string& name );
+
+	// AV specific public methods/actions
+	bool Action(std::string action);
+	bool Play();
+	bool SetURI(const std::string& uri );
+	bool GetPositionInfo(std::string& currenturi);
+	bool GetTransportInfo(std::string& state);
+	bool LeaveGroup();
+
+	// Rendering Control specific public methods/actions
+	bool SetVolume(int volume);
+	int  GetVolume();
+
+	// Sonos non-UPnP
+	bool GetPlay1Temperature(std::string& temperature);
+	bool Say(const std::string& tts, std::string& url, int type);
+
+	// Sonos UPnP Content Directory
+	bool LoadQueue(std::string& sURL);
 
 #if defined __linux__
 	GUPnPDeviceProxy	*renderer;
-	GUPnPServiceProxy   *av_transport;
-	GUPnPServiceProxy   *rendering_control;
-#endif
-} RendererDeviceData;
-
-typedef struct __ServerDeviceData {
-	unsigned long		ip;
-	int					type;
-	unsigned char		volume;
-	std::string			id;
-	std::string			udn;
-	std::string			name;
-#if defined __linux__
 	GUPnPDeviceProxy	*server;
-	GUPnPServiceProxy   *av_transport;
 #endif
-} ServerDeviceData;
+
+private:
+	// Renderer methods
+	bool SaveQueue();
+};
 
 typedef struct __DeviceData {
 	unsigned long		ip;
@@ -90,38 +123,14 @@ public:
 	void WriteToHardware(const char *pdata, const unsigned char length);
 	
 	// Update Renderer Value in Domoticz
-	void UpdateRendererValue( int qType, RendererDeviceData *upnpdevice, const std::string& devValue, int volume );
+	void UpdateRendererValue( int qType, UPnPDevice& upnpdevice, const std::string& devValue, int volume );
 	void UpdateSwitchValue( int qType, DeviceData *upnpdevice, const std::string& devValue, int level);
-
-	// Sonos UPnP AV specific public methods/actions
-	bool SonosAction(RendererDeviceData *upnpdevice, std::string action);
-	bool SonosActionPlay(RendererDeviceData *upnpdevice);
-	bool SonosActionSetURI(RendererDeviceData *upnpdevice, const std::string& uri );
-	bool SonosActionGetPositionInfo(RendererDeviceData *upnpdevice, std::string& currenturi);
-	bool SonosActionGetTransportInfo(RendererDeviceData *upnpdevice, std::string& state);
-	bool SonosActionLeaveGroup(RendererDeviceData *upnpdevice);
-
-	// Sonos UPnP Rendering Control specific public methods/actions
-	bool SonosActionSetVolume(RendererDeviceData *upnpdevice, int volume);
-	int  SonosActionGetVolume(RendererDeviceData *upnpdevice);
 
 	// Sonos UPnP Belkin WeMo actions @@@
 #ifdef BELKIN
-	int SonosActionGetBinaryState(DeviceData *upnpdevice);
-	bool SonosActionSetBinaryState(DeviceData *upnpdevice, int state);
+	int GetBinaryState(DeviceData *upnpdevice);
+	bool SetBinaryState(DeviceData *upnpdevice, int state);
 #endif
-
-	// Sonos UPnP Content Directory
-	bool SonosActionSaveQueue(RendererDeviceData *upnpdevice);
-	bool SonosActionLoadQueue(ServerDeviceData *upnpdevice, std::string& sURL);
-
-	// Sonos other UPnP methods
-	bool SonosGetRenderer(const std::string& deviceID, RendererDeviceData **upnpdevice);
-	bool SonosGetDeviceData(RendererDeviceData *upnpdevice, std::string& brand, std::string& model, std::string& name );
-
-	// Sonos non-UPnP
-	bool SonosActionSay(const std::string& tts, std::string& url, int type);
-	bool SonosActionGetPlay1Temperature(RendererDeviceData *upnpdevice, std::string& temperature);
 
 private:
 	bool								m_bEnabled;
@@ -135,6 +144,8 @@ private:
 	bool StartHardware();
 	bool StopHardware();
 	void Do_Work();	
+    bool ListMaps(void);
+    bool EraseMaps(void);
     void SonosInit(void);
 
 	// Sonos specific private methods
@@ -150,3 +161,49 @@ private:
 #endif
 };
 
+#ifdef _SNAPSHOT
+class CSonosSnapshot : public Object
+{
+public:
+	// Interface defined public constructor and methods
+	CSonosSnapshot(const int);
+	~CSonosSnapshot(void);
+
+    void Init( DeviceData *upnpdevice, bool snapshot_queue=False);
+	void Snapshot(void);
+	void Restore(int fade);
+	void SaveQueue(void);
+	void RestoreQueue(void);
+
+private:
+	// The device that will be snapshotted
+	DeviceData				*upnpdevice;
+
+	// The values that will be stored
+	// For all zones:
+	std::string				media_uri;		
+	bool					is_coordinator;
+	bool					is_playing_queue;	
+	unsigned char			volume;
+	unsigned char			mute;	
+	unsigned char			bass;   
+	unsigned char			treble; 
+	unsigned char			loudness;
+
+	// For coordinator zone playing from Queue:
+	unsigned char			play_mode; 
+	unsigned char			cross_fade;
+	unsigned char			playlist_position;
+	unsigned char			track_position;  
+
+	// For coordinator zone playing a Stream:
+	std::string				media_metadata; 
+
+	// For all coordinator zones
+	std::string				transport_state;
+//	queue;   // None
+
+	// Only set the queue as a list if we are going to save it
+//	queue = []
+};
+#endif
