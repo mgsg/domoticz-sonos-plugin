@@ -70,10 +70,11 @@
 // For hash calculation
 // #include <iostream>
 // #include <fstream>
+
 // #include <boost/filesystem.hpp>
-#include <boost/uuid/sha1.hpp>
-#include <boost/algorithm/string.hpp>
-#include <boost/unordered_map.hpp>
+// #include <boost/uuid/sha1.hpp>
+// #include <boost/algorithm/string.hpp>
+// #include <boost/unordered_map.hpp>
 
 // Conditional compiling
 #define _DEBUG							true
@@ -184,6 +185,7 @@ static void callbackGetTrackInfo(GUPnPDIDLLiteParser *parser,
 #endif
 
 /* Store / maps for UPnP devices */
+/*
 typedef boost::unordered_map<std::string,std::string>					UPnPNamesMap;
 typedef boost::unordered_map<std::string,UPnPDevice*>					UPnPDevicesMap;
 typedef boost::unordered_map<std::string,DeviceData*>					WemoMap;
@@ -191,9 +193,17 @@ typedef boost::unordered_map<std::string,DeviceData*>					WemoMap;
 typedef boost::unordered_map<std::string,std::string>::iterator			IteratorNames;
 typedef boost::unordered_map<std::string,UPnPDevice*>::iterator			IteratorDevices;
 typedef boost::unordered_map<std::string,DeviceData*>::iterator			IteratorWemos;
+*/
+typedef std::map<std::string,std::string>					UPnPNamesMap;
+typedef std::map<std::string,UPnPDevice*>					UPnPDevicesMap;
+typedef std::map<std::string,DeviceData*>					WemoMap;
+
+typedef std::map<std::string,std::string>::iterator			IteratorNames;
+typedef std::map<std::string,UPnPDevice*>::iterator			IteratorDevices;
+typedef std::map<std::string,DeviceData*>::iterator			IteratorWemos;
 
 static UPnPNamesMap					upnpnamesmap;	// Store MediaRenderers + MediaServers - key=udn data=long ip
-static UPnPDevicesMap				devicesmap;	// Store MediaRenderers - key=long ip data=UPnPDevice
+static UPnPDevicesMap				devicesmap;		// Store MediaRenderers - key=long ip data=UPnPDevice
 static WemoMap						wemosmap;		// Store Belkin Wemo - key=long ip data=DeviceData
 
 std::string							m_host_ip;
@@ -206,32 +216,8 @@ static int							hwIdStatic;		// idem
 
 /* Utilities */
 unsigned long helperGetIpFromLocation(const char *szLocation, char *szIP );
-std::string helperCreateHash(std::string a);
 std::string helperGetUserVariable(const std::string &name);
 bool helperChangeProtocol(std::string &url, int type);
-
-/*+----------------------------------------------------------------------------+*/
-/*| helperCreateHash.                                                          |*/
-/*+----------------------------------------------------------------------------+*/
-std::string helperCreateHash(std::string a) {
-	boost::uuids::detail::sha1 s;
-	char hash[21];
-	s.process_bytes(a.c_str(), a.size());
-	unsigned int digest[5];
-	s.get_digest(digest);
-	for(int i = 0; i < 5; ++i)
-	{
-		const char* tmp = reinterpret_cast<char*>(digest);
-		hash[i*4] = tmp[i*4+3];
-		hash[i*4+1] = tmp[i*4+2];
-		hash[i*4+2] = tmp[i*4+1];
-		hash[i*4+3] = tmp[i*4];
-	}
-	hash[20] = 0x00;
-
-	std::string ret(hash);
-	return (ret);
-}
 
 /*+----------------------------------------------------------------------------+*/
 /*| helperGetUserVariable                                                      |*/
@@ -312,6 +298,10 @@ bool CSonosPlugin::StopHardware()
 {
 	if (!m_bEnabled)
 		return false;
+
+#ifdef _DEBUG
+	_log.Log(LOG_STATUS,"(Sonos) Stop Hardware");
+#endif
 
 #ifdef __linux__
 	// quit upnp loop
@@ -396,7 +386,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 		upnpdevice = (UPnPDevice *)it->second;
 
 		int unit = pCmd->LIGHTING2.unitcode;
-		int volume = pCmd->LIGHTING2.level;
+		int vol_slider = pCmd->LIGHTING2.level;
 		int command = pCmd->LIGHTING2.cmnd;
 
 		// @@@ Command is not preserved ?¿
@@ -421,6 +411,8 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 				upnpdevice->name.c_str(), unit );
 #endif
 		} else if (pCmd->LIGHTING2.cmnd==sonos_sSetVolume) {
+			// vol_slider returns 0-16. SetVolume uses 0-100
+			int volume = round(vol_slider*(100.0f / 16.0f));
 			upnpdevice->SetVolume( volume );
 #ifdef _DEBUG
 			_log.Log(LOG_NORM,"(Sonos) WriteToHardware %s Volume from %d to %d", 
@@ -443,7 +435,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 				upnpdevice->Play();
 #ifdef _DEBUG
 				_log.Log(LOG_NORM,"(Sonos) WriteToHardware %s Play unit %d volume %d", 
-					upnpdevice->name.c_str(), unit, volume);
+					upnpdevice->name.c_str(), unit, upnpdevice->volume);
 #endif
 			} else {
 #ifdef _DEBUG
@@ -504,6 +496,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 
 		} else if (command == sonos_sDebug) {
 			ListMaps();
+//			upnpdevice->GetVolumeRange();
 
 		} else if (command >= sonos_sPreset) {
 			std::string sURL;
@@ -528,7 +521,7 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 			upnpdevice->Play();
 #ifdef _DEBUG
 			_log.Log(LOG_NORM,"(Sonos) WriteToHardware Preset devid %8X cmnd %d unit %d volume %d", 
-				ulIpAddress, pCmd->LIGHTING2.cmnd, unit, volume);
+				ulIpAddress, pCmd->LIGHTING2.cmnd, unit, upnpdevice->volume);
 #endif
 		} else {
 			_log.Log(LOG_ERROR,"(Sonos) WriteToHardware packet type %d, subtype %d or command %d unknown", 
@@ -540,7 +533,11 @@ void CSonosPlugin::WriteToHardware(const char *pdata, const unsigned char length
 }
 
 /*+----------------------------------------------------------------------------+*/
-/*| UpdateRendererValue - Update domoticz state in database and UI           |*/
+/*| UpdateRendererValue - Update domoticz state in database and UI             |*/
+/*| qType       - Can be UNIT_Sonos_PlayPause, UNIT_Sonos_TempPlay1,... @@@    |*/
+/*| p_reference - device to update                                             |*/
+/*| devValue    - Can be "0" for stop/pause, "1" for play and "34.3" for Temp. |*/
+/*| volume      - Can be -1 or volume (0-100%)                                 |*/
 /*+----------------------------------------------------------------------------+*/
 void CSonosPlugin::UpdateRendererValue(	int qType, 
 	UPnPDevice &p_reference,
@@ -685,6 +682,10 @@ void CSonosPlugin::UpdateRendererValue(	int qType,
 			int nValue=0;
 			nValue = (const int)atoi(devValue.c_str());
 
+			if (volume != NO_VOLUME_CHANGE) {
+				upnpdevice->volume = volume;
+			}
+
 			//Add Lighting log
 			m_sql.m_LastSwitchID=upnpdevice->id;
 			m_sql.m_LastSwitchRowID=ulIdx;
@@ -694,7 +695,7 @@ void CSonosPlugin::UpdateRendererValue(	int qType,
 
 			szQuery << 
 				"INSERT INTO LightingLog (DeviceRowID, nValue, sValue) "
-				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << nValue*15 << "')";
+				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << upnpdevice->volume << "')";	
 			m_sql.query(szQuery.str());
 
 			// Send as Lighting 2
@@ -716,11 +717,9 @@ void CSonosPlugin::UpdateRendererValue(	int qType,
 				lcmd.LIGHTING2.cmnd = sonos_sPlay;         
 			}
 
-			if (volume != NO_VOLUME_CHANGE) {
-				upnpdevice->volume = volume;
-			}
-
-			lcmd.LIGHTING2.level = upnpdevice->volume;
+			// UI Volume/dimmer level from 0-16. Device volume from 0-100
+			int iLevel = round((float(16) / 100.0f)*upnpdevice->volume);
+			lcmd.LIGHTING2.level = iLevel;
 			lcmd.LIGHTING2.filler = 0;
 			lcmd.LIGHTING2.rssi = 12;
 
@@ -739,7 +738,7 @@ void CSonosPlugin::UpdateRendererValue(	int qType,
 
 			szQuery << 
 				"INSERT INTO LightingLog (DeviceRowID, nValue, sValue) "
-				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << nValue*15 << "')";
+				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << upnpdevice->volume << "')";
 			m_sql.query(szQuery.str());
 
 			/* Push button!!! */
@@ -761,7 +760,9 @@ void CSonosPlugin::UpdateRendererValue(	int qType,
 			else if (qType >= UNIT_Sonos_Preset)
 				lcmd.LIGHTING2.cmnd = sonos_sPreset + preset_number - 1;		
 
-			lcmd.LIGHTING2.level = 0;
+			// UI Volume/dimmer level from 0-16. Device volume from 0-100
+			int iLevel = round((float(16) / 100.0f)*upnpdevice->volume);
+			lcmd.LIGHTING2.level = iLevel;
 			lcmd.LIGHTING2.filler = 0;
 			lcmd.LIGHTING2.rssi = 12;
 
@@ -883,7 +884,7 @@ void CSonosPlugin::UpdateSwitchValue(	int qType,
 
 			szQuery << 
 				"INSERT INTO LightingLog (DeviceRowID, nValue, sValue) "
-				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << nValue*15 << "')";
+				"VALUES ('" << ulIdx <<"', '" << nValue <<"', '" << upnpdevice->level << "')";	// sValue = nValue*15
 			m_sql.query(szQuery.str());
 
 			// Send as Lighting 2
@@ -906,11 +907,12 @@ void CSonosPlugin::UpdateSwitchValue(	int qType,
 			}
 
 			if (level != NO_LEVEL_CHANGE) {
-				lcmd.LIGHTING2.level = level;
-			} else {
-				lcmd.LIGHTING2.level = upnpdevice->level;
-			}
+				upnpdevice->level = level;
+			} 
 
+			// UI dimmer level from 0-16. Device level from 0-100
+			int iLevel = round((float(16) / 100.0f)*upnpdevice->level);
+			lcmd.LIGHTING2.level = iLevel;
 			lcmd.LIGHTING2.filler = 0;
 			lcmd.LIGHTING2.rssi = 12;
 
@@ -1199,7 +1201,7 @@ static void callbackDeviceDiscovered(GUPnPControlPoint *cp, GUPnPDeviceProxy *de
 		upnpdevice->GetDeviceData(brand, model, name);
 		_log.Log(LOG_NORM,"(Sonos) %s Discovered Br[%s] Mod[%s]", upnpdevice->name.c_str(), brand.c_str(), model.c_str());
 		upnpdevice->name = name;
-		upnpdevice->type = UPNP_TYPE_NULL;			// Not already identified
+//		upnpdevice->type = UPNP_TYPE_NULL;			// Not already identified
 		upnpdevice->prev_state = UPNP_STATE_STOPPED;
 		upnpdevice->restore_state = false;
 		upnpdevice->volume = 0;
@@ -1554,7 +1556,7 @@ UPnPDevice::~UPnPDevice(void)
 }
 
 /*+------------------------------------------------------------------------+*/
-/*| SonosGetDeviceData                                                     |*/
+/*| GetDeviceData                                                          |*/
 /*| Get extra information to create the domoticz devices.                  |*/
 /*| Here the device name is completed.                                     |*/
 /*+------------------------------------------------------------------------+*/
@@ -2025,9 +2027,47 @@ int UPnPDevice::GetVolume() {
 }
 
 /*+------------------------------------------------------------------------+*/
-/*| UPnP Action method to set volume on device.                            |*/
+/*| UPnP Action method to get volume from device.                          |*/
 /*+------------------------------------------------------------------------+*/
-bool UPnPDevice::SetVolume(int level) {
+bool UPnPDevice::GetVolumeRange() {
+	UPnPDevice *upnpdevice = this;
+
+	/* Get rendering control service for device */
+	GUPnPServiceProxy *rendering_control;
+	rendering_control = GUPNP_SERVICE_PROXY (gupnp_device_info_get_service(GUPNP_DEVICE_INFO(upnpdevice->renderer), 
+		UPNP_SRV_RENDERING_CONTROL));
+	if (rendering_control == NULL) {
+		_log.Log(LOG_ERROR,"(Sonos) GetVolumeRange error getting rendering control for device %s", upnpdevice->name.c_str());
+		return false;
+	}
+
+	/* GetVolume */
+	bool success;
+	GError *error = NULL;
+	int max = 0, min=0;
+	success = (bool)gupnp_service_proxy_send_action (rendering_control, "GetVolumeDBRange", &error,
+		"InstanceID", G_TYPE_UINT, 0,
+		"Channel", G_TYPE_STRING, "Master",
+		NULL,
+		"MinValue", G_TYPE_UINT, &min,
+		"MaxValue", G_TYPE_UINT, &max,
+		NULL);
+	if (!success) {
+		_log.Log(LOG_ERROR,"(Sonos) GetVolumeRange error %s", error->message);
+		g_error_free (error);
+		return false;
+	}
+#ifdef _DEBUG
+	_log.Log(LOG_NORM,"(Sonos) GetVolumeRange Max=%d Min=%d for %s", max, min, upnpdevice->name.c_str());
+#endif
+	return(true);
+}
+
+/*+------------------------------------------------------------------------+*/
+/*| UPnP Action method to set volume on device.                            |*/
+/*| SetVolume - vol_level between 0 and 100                                |*/
+/*+------------------------------------------------------------------------+*/
+bool UPnPDevice::SetVolume(int vol_level) {
 	UPnPDevice *upnpdevice = this;
 
 	/* Get rendering control service for device */
@@ -2043,16 +2083,12 @@ bool UPnPDevice::SetVolume(int level) {
 	/* SetVolume */
 	GError *error = NULL;
 	bool success;
-	int volume=0;
 
-	if (upnpdevice->type == UPNP_TYPE_SONOS) 
-		volume = (int)((level*100) / 15);
-	else
-		volume = level;
-
+	int volume=vol_level;
 	if (volume > 100)
 		volume = 100;
 
+	/* Sonos expects volume to be between 0 and 15 */
 	success = (bool)gupnp_service_proxy_send_action (rendering_control, "SetVolume", &error,
 		"InstanceID", G_TYPE_UINT, 0,
 		"Channel", G_TYPE_STRING, "Master",													
@@ -2422,18 +2458,20 @@ bool CSonosPlugin::EraseMaps(void)
 	// Fetch Media Server / Renderer Devices
 	for(IteratorDevices itr = devicesmap.begin(); itr != devicesmap.end(); ++itr) {
 		delete itr->second;
-		itr = devicesmap.erase(itr);
+		devicesmap.erase(itr);
 	}
+	_log.Log(LOG_NORM,"(Sonos) Erase Devicesmap");
 
 	// Fetch Switches / Wemos
 	for(IteratorWemos itw = wemosmap.begin(); itw != wemosmap.end(); ++itw) {
 		delete itw->second;
-		itw = wemosmap.erase(itw);
+		wemosmap.erase(itw);
 	}
+	_log.Log(LOG_NORM,"(Sonos) Erase Wemos");
 
 	// Fetch Names
 	for(IteratorNames itmd = upnpnamesmap.begin(); itmd != upnpnamesmap.end(); ++itmd) {
-		itmd = upnpnamesmap.erase(itmd);
+		upnpnamesmap.erase(itmd);
 	}
 
 
@@ -2491,6 +2529,11 @@ void CSonosPlugin::SonosInit(void)
 	This call will run forever waiting for new devices to appear*/
 	main_loop = g_main_loop_new (NULL, FALSE);
 	g_main_loop_run (main_loop);
+
+	/* Stop searching */
+	gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpmr), FALSE);
+	gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpms), FALSE);
+	gssdp_resource_browser_set_active (GSSDP_RESOURCE_BROWSER (cpbw), FALSE);
 
 	/* Clean up */
 	_log.Log(LOG_NORM,"(Sonos) SonosInit clean devices");     
@@ -2608,12 +2651,8 @@ Browse -> SQ:24
 	Parse the <res></res> out of the metadata for SQ:24 and pass this as the URI.
 
 	HINT 5:
-#endif
+https://raw.githubusercontent.com/SoCo/SoCo/master/soco/snapshot.py
 
-#ifdef _SNAPSHOT
-/*+----------------------------------------------------------------------------+*/
-/*| https://raw.githubusercontent.com/SoCo/SoCo/master/soco/snapshot.py        |*/
-/*
 Class to support snap-shotting the current Sonos State, and then
 restoring it later
 
@@ -2626,259 +2665,5 @@ List of sources that may be playing using root of media_uri:
 'x-sonosapi-stream': playing a stream (eg radio)
 'x-file-cifs': playing file
 'x-rincon': slave zone (only change volume etc. rest from coordinator) */
-/*+----------------------------------------------------------------------------+*/
-
-/*+----------------------------------------------------------------------------+*/
-/*| CSonosShapshot class.                                                      |*/
-/*+----------------------------------------------------------------------------+*/
-CSonosShapshot::CSonosShapshot( DeviceData *upnpdevice, bool snapshot_queue=False) {
-	/* Construct the Snapshot object
-
-	:params device: Device to snapshot
-	:params snapshot_queue: If the queue is to be snapshotted
-
-	:return is_coordinator (Boolean)- tells users if to play alert
-	playing an alert on a slave will un group it!
-
-	Note: It is strongly advised that you do not snapshot the
-	queue unless you really need to as it takes a very long
-	time to restore large queues as it is done one track at
-	a time
-	*/
-
-	// The device that will be snapshotted
-	this.device = upnpdevice;
-
-	// The values that will be stored
-	// For all zones:
-	this.media_uri= "";
-	this.is_coordinator = False
-		this.is_playing_queue = False
-
-		this.volume= 0;
-	this.mute= 0;
-	this.bass= 0;
-	this.treble= 0;
-	this.loudness= 0;
-
-	// For coordinator zone playing from Queue:
-	this.play_mode= 0;
-	this.cross_fade= 0;
-	this.playlist_position= 0;
-	this.track_position= 0;
-
-	// For coordinator zone playing a Stream:
-	this.media_metadata= 0;
-
-	// For all coordinator zones
-	this.transport_state= 0;
-
-	this.queue= 0;
-
-	// Only set the queue as a list if we are going to save it
-	if (snapshot_queue) {
-		// Create queue
-		//		this.queue = []
-	}
-}
-
-/*+----------------------------------------------------------------------------+*/
-/*| CSonosShapshot class destructor.                                           |*/
-/*+----------------------------------------------------------------------------+*/
-CSonosShapshot::~CSonosShapshot(void)
-{
-}
-
-/*+----------------------------------------------------------------------------+*/
-/*| Snapshot - save state                                                      |*/
-/*+----------------------------------------------------------------------------+*/
-void CSonosShapshot::Snapshot(void) {
-	/* 
-	* Record and store the current state of a device
-	*/
-
-	// Get information about the currently playing media
-	media_info = this.device.avTransport.GetMediaInfo([('InstanceID', 0)])
-		this.media_uri = media_info['CurrentURI']
-
-	// extract source from media uri
-	if this.media_uri.split(':')[0] != 'x-rincon':
-	this.is_coordinator = true;
-	if this.media_uri.split(':')[0] == 'x-rincon-queue':
-	this.is_playing_queue = true;
-
-	// Save the volume, mute and other sound settings
-	this.volume = this.device.volume
-		this.mute = this.device.mute
-		this.bass = this.device.bass
-		this.treble = this.device.treble
-		this.loudness = this.device.loudness
-
-		// get details required for what's playing:
-		if this.is_playing_queue:
-	// playing from queue - save repeat, random, cross fade, track, etc.
-	this.play_mode = this.device.play_mode
-		this.cross_fade = this.device.cross_fade
-
-		// Get information about the currently playing track
-		track_info = this.device.get_current_track_info()
-		if track_info is not None:
-	position = track_info['playlist_position'];
-	if (position != "") {
-		// save as integer
-		this.playlist_position = int(position)
-			this.track_position = track_info['position']
-	} else {
-		// playing from a stream - save media metadata
-		this.media_metadata = media_info['CurrentURIMetaData']
-	}
-	// Work out what the playing state is - if a coordinator
-	if (this.is_coordinator)
-		transport_info = this.device.get_current_transport_info();
-
-	if (transport_info != 0)
-		this.transport_state = transport_info['current_transport_state'];
-
-	// Save of the current queue if we need to
-	this._save_queue()
-
-		// return if device is a coordinator (helps usage)
-		return this.is_coordinator
-}
-
-/*+----------------------------------------------------------------------------+*/
-/*| Restore - restore state                                                    |*/
-/*+----------------------------------------------------------------------------+*/
-void CSonosShapshot::Restore(int fade) {
-	/* Restores the state of a device that was previously saved
-	* For coordinator devices restore everything
-	* For slave devices only restore volume etc. not transport info
-	* (transport info comes from the slaves coordinator).
-	*/
-
-	// Start by ensuring that the speaker is paused as we don't want
-	// things all rolling back when we are changing them, as this could
-	// include things like audio
-	if (this.is_coordinator)
-		transport_info = this.device.get_current_transport_info();
-
-	if (transport_info != 0)
-		if transport_info['current_transport_state'] == 'PLAYING':
-	this.device.pause()
-
-		// Check if the queue should be restored
-		this._restore_queue()
-
-		// Reinstate what was playing
-		if (this.is_playing_queue && this.playlist_position > 0) {
-
-			// was playing from playlist
-			if this.playlist_position is not None:
-
-			// The position in the playlist returned by
-			// get_current_track_info starts at 1, but when
-			// playing from playlist, the index starts at 0
-			// if position > 0:
-			this.playlist_position -= 1
-				this.device.play_from_queue(this.playlist_position, False)
-
-				if this.track_position is not None:
-			if this.track_position != "":
-			this.device.seek(this.track_position);
-
-			// reinstate track, position, play mode, cross fade
-			// Need to make sure there is a proper track selected first
-			this.device.play_mode = this.play_mode;
-			this.device.cross_fade = this.cross_fade;
-		} else {
-			// was playing a stream (radio station, file, or nothing)
-			// reinstate uri and meta data
-			if this.media_uri != "":
-			this.device.play_uri(this.media_uri, this.media_metadata, start=False);
-
-			// For all devices:
-			// Reinstate all the properties that are pretty easy to do
-			this.device.mute = this.mute
-				this.device.bass = this.bass
-				this.device.treble = this.treble
-				this.device.loudness = this.loudness
-
-				// Reinstate volume
-				// Can only change volume on device with fixed volume set to False
-				// otherwise get uPnP error, so check first. Before issuing a network
-				// command to check, fixed volume always has volume set to 100.
-				// So only checked fixed volume if volume is 100.
-				if (this.volume == 100)
-					fixed_vol = this.device.renderingControl.GetOutputFixed([('InstanceID', 0)])['CurrentFixed'];
-				else
-					fixed_vol = False;
-
-			// now set volume if not fixed
-			if not fixed_vol:
-			if fade:
-			// if fade requested in restore
-			// set volume to 0 then fade up to saved volume (non blocking)
-			this.device.volume = 0
-				this.device.renderingControl.RampToVolume([('InstanceID', 0), ('Channel', 'Master'),
-				('RampType', 'SLEEP_TIMER_RAMP_TYPE'),
-				('DesiredVolume', this.volume),
-				('ResetVolumeAfter', False), ('ProgramURI', '')])
-			else
-			// set volume
-			this.device.volume = this.volume
-
-			// Now everything is set, see if we need to be playing, stopped
-			// or paused ( only for coordinators)
-			if this.is_coordinator:
-			if this.transport_state == 'PLAYING':
-			this.device.play()
-				elif this.transport_state == 'STOPPED':
-			this.device.stop()
-		}
-
-		/*+----------------------------------------------------------------------------+*/
-		/*| SaveQueue                                                                  |*/
-		/*+----------------------------------------------------------------------------+*/
-		void CSonosShapshot::SaveQueue(void) {
-			/* 
-			* Saves the current state of the queue
-			*/
-			if this.queue is not None:
-
-			// Maximum batch is 486, anything larger will still only
-			// return 486
-			batch_size = 400
-				total = 0
-				num_return = batch_size
-
-				// Need to get all the tracks in batches, but Only get the next
-				// batch if all the items requested were in the last batch
-				while num_return == batch_size:
-			queue_items = this.device.get_queue(total, batch_size)
-				// Check how many entries were returned
-				num_return = len(queue_items)
-				// Make sure the queue is not empty
-				if num_return > 0:
-			this.queue.append(queue_items)
-				// Update the total that have been processed
-				total = total + num_return
-		}
-
-		void CSonosShapshot::RestoreQueue(void) {
-			/* Restores the previous state of the queue
-
-			Note: The restore currently adds the items back into the queue
-			using the URI, for items the Sonos system already knows about
-			this is OK, but for other items, they may be missing some of
-			their metadata as it will not be automatically picked up
-			*/
-			if this.queue is not None:
-			// Clear the queue so that it can be reset
-			this.device.clear_queue()
-				// Now loop around all the queue entries adding them
-				for queue_group in this.queue:
-			for queue_item in queue_group:
-			this.device.add_uri_to_queue(queue_item.uri)
-		}
 #endif
 

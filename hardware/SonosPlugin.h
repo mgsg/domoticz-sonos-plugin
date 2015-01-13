@@ -77,6 +77,7 @@ public:
 	// Rendering Control specific public methods/actions
 	bool SetVolume(int volume);
 	int  GetVolume();
+	bool GetVolumeRange();
 
 	// Sonos non-UPnP
 	bool GetPlay1Temperature(std::string& temperature);

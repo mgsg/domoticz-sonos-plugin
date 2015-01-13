@@ -2,6 +2,7 @@
 #include "WebServer.h"
 #include <boost/bind.hpp>
 #include <boost/lexical_cast.hpp>
+#include <boost/algorithm/string/join.hpp>
 #include <iostream>
 #include "mainworker.h"
 #include "Helper.h"
@@ -132,6 +133,7 @@ namespace http {
 			infile.open(switchlightsfile.c_str());
 			if (infile.is_open())
 			{
+				int index = 0;
 				while (!infile.eof())
 				{
 					getline(infile, sLine);
@@ -142,6 +144,7 @@ namespace http {
 						if (results.size() == 3)
 						{
 							_tCustomIcon cImage;
+							cImage.idx = index++;
 							cImage.RootFile = results[0];
 							cImage.Title = results[1];
 							cImage.Description = results[2];
@@ -149,6 +152,7 @@ namespace http {
 						}
 					}
 				}
+				infile.close();
 			}
 
 			CheckAppCache(serverpath);
@@ -363,6 +367,7 @@ namespace http {
 			RegisterRType("deletescene", boost::bind(&CWebServer::RType_DeleteScene, this, _1));
 			RegisterRType("updatescene", boost::bind(&CWebServer::RType_UpdateScene, this, _1));
 			RegisterRType("createvirtualsensor", boost::bind(&CWebServer::RType_CreateVirtualSensor, this, _1));
+			RegisterRType("createevohomesensor", boost::bind(&CWebServer::RType_CreateEvohomeSensor, this, _1));
 			RegisterRType("custom_light_icons", boost::bind(&CWebServer::RType_CustomLightIcons, this, _1));
 			RegisterRType("plans", boost::bind(&CWebServer::RType_Plans, this, _1));
 			RegisterRType("floorplans", boost::bind(&CWebServer::RType_FloorPlans, this, _1));
@@ -714,6 +719,9 @@ namespace http {
 			else if (htype == HTYPE_Dummy) {
 				//all fine here!
 			}
+			else if (htype == HTYPE_EVOHOME_SCRIPT || htype == HTYPE_EVOHOME_SERIAL) {
+				//all fine here!
+			}
 			else if (htype == HTYPE_PiFace) {
 				//all fine here!
 			}
@@ -851,6 +859,9 @@ namespace http {
 				//All fine here
 			}
 			else if (htype == HTYPE_Dummy) {
+				//All fine here
+			}
+			else if (htype == HTYPE_EVOHOME_SCRIPT || htype == HTYPE_EVOHOME_SERIAL) {
 				//All fine here
 			}
 			else if (htype == HTYPE_PiFace) {
@@ -3188,7 +3199,10 @@ namespace http {
 				false
 				);
 
-			if ((iType == pTypeThermostat) && (iSubType == sTypeThermSetpoint))
+			if (
+				((iType == pTypeThermostat) && (iSubType == sTypeThermSetpoint))||
+				((iType == pTypeRadiator1) && (iSubType== sTypeSmartwares))
+				)
 			{
 				int urights = 3;
 				bool bHaveUser = (m_pWebEm->m_actualuser != "");
@@ -4001,6 +4015,8 @@ namespace http {
 						case HTYPE_EnOceanESP2:
 						case HTYPE_EnOceanESP3:
 						case HTYPE_Dummy:
+						case HTYPE_EVOHOME_SCRIPT:
+						case HTYPE_EVOHOME_SERIAL:
 						case HTYPE_RaspberryGPIO:
 							root["result"][ii]["idx"] = ID;
 							root["result"][ii]["Name"] = Name;
@@ -4059,7 +4075,7 @@ namespace http {
 						int SubType = atoi(sd[3].c_str());
 						int used = atoi(sd[4].c_str());
 						_eSwitchType switchtype = (_eSwitchType)atoi(sd[5].c_str());
-						bool bdoAdd;
+						bool bdoAdd=false;
 						switch (Type)
 						{
 						case pTypeLighting1:
@@ -4070,6 +4086,7 @@ namespace http {
 						case pTypeLighting6:
 						case pTypeLimitlessLights:
 						case pTypeSecurity1:
+						case pTypeEvohome:
 						case pTypeCurtain:
 						case pTypeBlinds:
 						case pTypeRFY:
@@ -4077,6 +4094,7 @@ namespace http {
 						case pTypeThermostat2:
 						case pTypeThermostat3:
 						case pTypeRemote:
+						case pTypeRadiator1:
 							bdoAdd = true;
 							if (!used)
 							{
@@ -4092,6 +4110,8 @@ namespace http {
 								if (resultSD.size() > 0)
 									bdoAdd = true;
 							}
+							if ((Type == pTypeRadiator1) && (SubType != sTypeSmartwaresSwitchRadiator))
+								bdoAdd = false;
 							if (bdoAdd)
 							{
 								root["result"][ii]["idx"] = ID;
@@ -4120,7 +4140,7 @@ namespace http {
 				int ii = 0;
 
 				//First List/Switch Devices
-				szQuery << "SELECT ID, Name, Type, Used FROM DeviceStatus ORDER BY Name";
+				szQuery << "SELECT ID, Name, Type, SubType, Used FROM DeviceStatus ORDER BY Name";
 				result = m_sql.query(szQuery.str());
 				if (result.size() > 0)
 				{
@@ -4132,7 +4152,8 @@ namespace http {
 						std::string ID = sd[0];
 						std::string Name = sd[1];
 						int Type = atoi(sd[2].c_str());
-						int used = atoi(sd[3].c_str());
+						int SubType = atoi(sd[3].c_str());
+						int used = atoi(sd[4].c_str());
 						if (used)
 						{
 							switch (Type)
@@ -4145,6 +4166,7 @@ namespace http {
 							case pTypeLighting6:
 							case pTypeLimitlessLights:
 							case pTypeSecurity1:
+							case pTypeEvohome:
 							case pTypeCurtain:
 							case pTypeBlinds:
 							case pTypeRFY:
@@ -4152,12 +4174,19 @@ namespace http {
 							case pTypeThermostat2:
 							case pTypeThermostat3:
 							case pTypeRemote:
-							{
 								root["result"][ii]["type"] = 0;
 								root["result"][ii]["idx"] = ID;
 								root["result"][ii]["Name"] = "[Light/Switch] " + Name;
 								ii++;
-							}
+								break;
+							case pTypeRadiator1:
+								if (SubType == sTypeSmartwaresSwitchRadiator)
+								{
+									root["result"][ii]["type"] = 0;
+									root["result"][ii]["idx"] = ID;
+									root["result"][ii]["Name"] = "[Light/Switch] " + Name;
+									ii++;
+								}
 								break;
 							}
 						}
@@ -4656,6 +4685,20 @@ namespace http {
 						sunitcode = szTmp;
 						devid = id;
 					}
+					else if (lighttype == 301)
+					{
+						//Smartwares Radiator
+						dtype = pTypeRadiator1;
+						subtype = sTypeSmartwaresSwitchRadiator;
+						std::string id = m_pWebEm->FindValue("id");
+						sunitcode = m_pWebEm->FindValue("unitcode");
+						if (
+							(id == "") ||
+							(sunitcode == "")
+							)
+							return;
+						devid = id;
+					}
 				}
 				root["status"] = "OK";
 				root["message"] = "OK";
@@ -4958,6 +5001,60 @@ namespace http {
 						sunitcode = szTmp;
 						devid = id;
 					}
+					else if (lighttype == 301)
+					{
+						//Smartwares Radiator
+						std::string id = m_pWebEm->FindValue("id");
+						sunitcode = m_pWebEm->FindValue("unitcode");
+						if (
+							(id == "") ||
+							(sunitcode == "")
+							)
+							return;
+						devid = id;
+
+						//For this device, we will also need to add a Radiator type, do that first
+						dtype = pTypeRadiator1;
+						subtype = sTypeSmartwares;
+
+						//check if switch is unique
+						std::vector<std::vector<std::string> > result;
+						std::stringstream szQuery;
+						szQuery << "SELECT Name FROM DeviceStatus WHERE (HardwareID==" << hwdid << " AND DeviceID=='" << devid << "' AND Unit==" << sunitcode << " AND Type==" << dtype << " AND SubType==" << subtype << ")";
+						result = m_sql.query(szQuery.str());
+						if (result.size() > 0)
+						{
+							root["message"] = "Switch already exists!";
+							return;
+						}
+						bool bActEnabledState = m_sql.m_bAcceptNewHardware;
+						m_sql.m_bAcceptNewHardware = true;
+						std::string devname;
+						m_sql.UpdateValue(atoi(hwdid.c_str()), devid.c_str(), atoi(sunitcode.c_str()), dtype, subtype, 0, -1, 0, "20.5", devname);
+						m_sql.m_bAcceptNewHardware = bActEnabledState;
+
+						//set name and switchtype
+						szQuery.clear();
+						szQuery.str("");
+						szQuery << "SELECT ID FROM DeviceStatus WHERE (HardwareID==" << hwdid << " AND DeviceID=='" << devid << "' AND Unit==" << sunitcode << " AND Type==" << dtype << " AND SubType==" << subtype << ")";
+						result = m_sql.query(szQuery.str());
+						if (result.size() < 1)
+						{
+							root["message"] = "Error finding switch in Database!?!?";
+							return;
+						}
+						std::string ID = result[0][0];
+
+						szQuery.clear();
+						szQuery.str("");
+						szQuery << "UPDATE DeviceStatus SET Used=1, Name='" << name << "', SwitchType=" << switchtype << " WHERE (ID == " << ID << ")";
+						result = m_sql.query(szQuery.str());
+
+						//Now continue to insert the switch
+						dtype = pTypeRadiator1;
+						subtype = sTypeSmartwaresSwitchRadiator;
+
+					}
 				}
 
 				//check if switch is unique
@@ -5049,13 +5146,15 @@ namespace http {
 					(dType == pTypeLighting6) ||
 					(dType == pTypeLimitlessLights) ||
 					(dType == pTypeSecurity1) ||
+					(dType == pTypeEvohome) ||
 					(dType == pTypeCurtain) ||
 					(dType == pTypeBlinds) ||
 					(dType == pTypeRFY) ||
 					(dType == pTypeChime) ||
 					(dType == pTypeThermostat2) ||
 					(dType == pTypeThermostat3) ||
-					(dType == pTypeRemote)
+					(dType == pTypeRemote)||
+					((dType == pTypeRadiator1) && (dSubType == sTypeSmartwaresSwitchRadiator))
 					)
 				{
 					if (switchtype != STYPE_PushOff)
@@ -5079,6 +5178,8 @@ namespace http {
 					(dType == pTypeTEMP_HUM) ||
 					(dType == pTypeTEMP_HUM_BARO) ||
 					(dType == pTypeTEMP_BARO) ||
+					(dType == pTypeEvohomeZone) ||
+					(dType == pTypeEvohomeWater) ||
 					(dType == pTypeThermostat1) ||
 					(dType == pTypeRego6XXTemp) ||
 					((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorTemp))
@@ -5222,6 +5323,13 @@ namespace http {
 					root["result"][ii]["ptag"] = Notification_Type_Desc(NTYPE_USAGE, 1);
 					ii++;
 				}
+				if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+				{
+					root["result"][ii]["val"] = NTYPE_USAGE;
+					root["result"][ii]["text"] = Notification_Type_Desc(NTYPE_USAGE, 0);
+					root["result"][ii]["ptag"] = Notification_Type_Desc(NTYPE_USAGE, 1);
+					ii++;
+				}
 				if ((dType == pTypeGeneral) && (dSubType == sTypePressure))
 				{
 					root["result"][ii]["val"] = NTYPE_USAGE;
@@ -5317,6 +5425,13 @@ namespace http {
 					root["result"][ii]["val"] = NTYPE_TEMPERATURE;
 					root["result"][ii]["text"] = Notification_Type_Desc(NTYPE_TEMPERATURE, 0);
 					root["result"][ii]["ptag"] = Notification_Type_Desc(NTYPE_TEMPERATURE, 1);
+					ii++;
+				}
+				if ((dType == pTypeEvohomeZone))
+				{
+					root["result"][ii]["val"]=NTYPE_TEMPERATURE;
+					root["result"][ii]["text"]=Notification_Type_Desc(NTYPE_SETPOINT,0); //FIXME NTYPE_SETPOINT implementation?
+					root["result"][ii]["ptag"]=Notification_Type_Desc(NTYPE_SETPOINT,1);
 					ii++;
 				}
 				if ((dType == pTypeRFXSensor) && ((dSubType == sTypeRFXSensorAD) || (dSubType == sTypeRFXSensorVolt)))
@@ -5843,13 +5958,15 @@ namespace http {
 					(dType != pTypeLighting6) &&
 					(dType != pTypeLimitlessLights) &&
 					(dType != pTypeSecurity1) &&
+					(dType != pTypeEvohome) &&
 					(dType != pTypeCurtain) &&
 					(dType != pTypeBlinds) &&
 					(dType != pTypeRFY) &&
 					(dType != pTypeChime) &&
 					(dType != pTypeThermostat2) &&
 					(dType != pTypeThermostat3) &&
-					(dType != pTypeRemote)
+					(dType != pTypeRemote)&&
+					(!((dType == pTypeRadiator1) && (dSubType == sTypeSmartwaresSwitchRadiator)))
 					)
 					return; //no light device! we should not be here!
 
@@ -6006,6 +6123,56 @@ namespace http {
 					return;
 				}
 			}
+			else if (cparam=="switchmodal")
+			{
+				int urights=3;
+				if (bHaveUser)
+				{
+					int iUser=-1;
+					iUser=FindUser(m_pWebEm->m_actualuser.c_str());
+					if (iUser != -1)
+					{
+						urights = (int)m_users[iUser].userrights;
+						_log.Log(LOG_STATUS, "User: %s initiated a modal command", m_users[iUser].Username.c_str());
+					}
+				}
+				if (urights<1)
+					return;
+
+				std::string idx=m_pWebEm->FindValue("idx");
+				std::string switchcmd=m_pWebEm->FindValue("status");
+				std::string until=m_pWebEm->FindValue("until");//optional until date / time as applicable
+				std::string action=m_pWebEm->FindValue("action");//Run action or not (update status only)
+				std::string onlyonchange=m_pWebEm->FindValue("ooc");//No update unless the value changed (check if updated)
+				//The on action is used to call a script to update the real device so we only want to use it when altering the status in the Domoticz Web Client
+				//If we're posting the status from the real device to domoticz we don't want to run the on action script ("action"!=1) to avoid loops and contention
+				//""... we only want to log a change (and trigger an event) when the status has actually changed ("ooc"==1) i.e. suppress non transient updates
+				if ((idx=="")||(switchcmd==""))
+					return;
+
+				std::string passcode=m_pWebEm->FindValue("passcode");
+				if (passcode.size()>0) 
+				{
+					//Check if passcode is correct
+					passcode=base64_encode((const unsigned char*)passcode.c_str(),passcode.size());
+					std::string rpassword;
+					int nValue=1;
+					m_sql.GetPreferencesVar("ProtectionPassword",nValue,rpassword);
+					if (passcode!=rpassword)
+					{
+						root["title"]="Modal";
+						root["status"]="ERROR";
+						root["message"]="WRONG CODE";
+						return;
+					}
+				}
+
+				if (m_mainworker.SwitchModal(idx,switchcmd,action,onlyonchange,until)==true)//FIXME we need to return a status of already set / no update if ooc=="1" and no status update was performed
+				{
+					root["status"]="OK";
+					root["title"]="Modal";
+				}
+			} 
 			else if (cparam == "switchlight")
 			{
 				int urights = 3;
@@ -6025,6 +6192,7 @@ namespace http {
 				std::string idx = m_pWebEm->FindValue("idx");
 				std::string switchcmd = m_pWebEm->FindValue("switchcmd");
 				std::string level = m_pWebEm->FindValue("level");
+				std::string onlyonchange=m_pWebEm->FindValue("ooc");//No update unless the value changed (check if updated)
 				if ((idx == "") || (switchcmd == ""))
 					return;
 
@@ -6045,7 +6213,7 @@ namespace http {
 					}
 				}
 
-				if (m_mainworker.SwitchLight(idx, switchcmd, level, "-1") == true)
+				if (m_mainworker.SwitchLight(idx,switchcmd,level,"-1",onlyonchange)==true)
 				{
 					root["status"] = "OK";
 					root["title"] = "SwitchLight";
@@ -6417,21 +6585,24 @@ namespace http {
 
 				std::string name = m_pWebEm->FindValue("name");
 				std::string imagefile = m_pWebEm->FindValue("image");
+				std::string scalefactor = m_pWebEm->FindValue("scalefactor");
 				if (
 					(name == "") ||
-					(imagefile == "")
+					(imagefile == "") ||
+					(scalefactor == "")
 					)
 					return;
 
 				root["status"] = "OK";
 				root["title"] = "AddFloorplan";
 				sprintf(szTmp,
-					"INSERT INTO Floorplans (Name,ImageFile) VALUES ('%s','%s')",
+					"INSERT INTO Floorplans (Name,ImageFile,ScaleFactor) VALUES ('%s','%s',%s)",
 					name.c_str(),
-					imagefile.c_str()
+					imagefile.c_str(),
+					scalefactor.c_str()
 					);
 				result = m_sql.query(szTmp);
-				_log.Log(LOG_STATUS, "(Floorplan) '%s' created with image file '%s'.", name.c_str(), imagefile.c_str());
+				_log.Log(LOG_STATUS, "(Floorplan) '%s' created with image file '%s', Scale Factor %s.", name.c_str(), imagefile.c_str(), scalefactor.c_str());
 			}
 			else if (cparam == "updatefloorplan")
 			{
@@ -6452,6 +6623,7 @@ namespace http {
 					return;
 				std::string name = m_pWebEm->FindValue("name");
 				std::string imagefile = m_pWebEm->FindValue("image");
+				std::string scalefactor = m_pWebEm->FindValue("scalefactor");
 				if (
 					(name == "") ||
 					(imagefile == "")
@@ -6462,13 +6634,14 @@ namespace http {
 				root["title"] = "UpdateFloorplan";
 
 				sprintf(szTmp,
-					"UPDATE Floorplans SET Name='%s',ImageFile='%s' WHERE (ID == %s)",
+					"UPDATE Floorplans SET Name='%s',ImageFile='%s', ScaleFactor=%s WHERE (ID == %s)",
 					name.c_str(),
 					imagefile.c_str(),
+					scalefactor.c_str(),
 					idx.c_str()
 					);
 				result = m_sql.query(szTmp);
-				_log.Log(LOG_STATUS, "(Floorplan) '%s' updated with image file '%s'.", name.c_str(), imagefile.c_str());
+				_log.Log(LOG_STATUS, "(Floorplan) '%s' updated with image file '%s', Scale Factor %s.", name.c_str(), imagefile.c_str(), scalefactor.c_str());
 			}
 			else if (cparam == "deletefloorplan")
 			{
@@ -6854,10 +7027,10 @@ namespace http {
 					{
 						WebUserName = base64_decode(WebUserName);
 						WebPassword = base64_decode(WebPassword);
-						AddUser(10000, WebUserName, WebPassword, URIGHTS_ADMIN);
+						AddUser(10000, WebUserName, WebPassword, URIGHTS_ADMIN, 0xFFFF);
 
 						std::vector<std::vector<std::string> > result;
-						result = m_sql.query("SELECT ID, Active, Username, Password, Rights FROM Users");
+						result = m_sql.query("SELECT ID, Active, Username, Password, Rights, TabsEnabled FROM Users");
 						if (result.size() > 0)
 						{
 							std::vector<std::vector<std::string> >::const_iterator itt;
@@ -6866,17 +7039,18 @@ namespace http {
 							{
 								std::vector<std::string> sd = *itt;
 
-								unsigned long ID = (unsigned long)atol(sd[0].c_str());
-
-								std::string username = base64_decode(sd[2]);
-								std::string password = base64_decode(sd[3]);
-
-								_eUserRights rights = (_eUserRights)atoi(sd[4].c_str());
-
 								int bIsActive = static_cast<int>(atoi(sd[1].c_str()));
 								if (bIsActive)
 								{
-									AddUser(ID, username, password, rights);
+									unsigned long ID = (unsigned long)atol(sd[0].c_str());
+
+									std::string username = base64_decode(sd[2]);
+									std::string password = base64_decode(sd[3]);
+
+									_eUserRights rights = (_eUserRights)atoi(sd[4].c_str());
+									int activetabs = atoi(sd[5].c_str());
+
+									AddUser(ID, username, password, rights, activetabs);
 								}
 							}
 						}
@@ -6886,16 +7060,17 @@ namespace http {
 			m_mainworker.LoadSharedUsers();
 		}
 
-		void CWebServer::AddUser(const unsigned long ID, const std::string &username, const std::string &password, const int userrights)
+		void CWebServer::AddUser(const unsigned long ID, const std::string &username, const std::string &password, const int userrights, const int activetabs)
 		{
 			_tWebUserPassword wtmp;
 			wtmp.ID = ID;
 			wtmp.Username = username;
 			wtmp.Password = password;
 			wtmp.userrights = (_eUserRights)userrights;
+			wtmp.ActiveTabs = activetabs;
 			m_users.push_back(wtmp);
 
-			m_pWebEm->AddUserPassword(ID, username, password, (_eUserRights)userrights);
+			m_pWebEm->AddUserPassword(ID, username, password, (_eUserRights)userrights, activetabs);
 		}
 
 		void CWebServer::ClearUserPasswords()
@@ -7560,6 +7735,7 @@ namespace http {
 			bool bHaveUser = (m_pWebEm->m_actualuser != "");
 			int iUser = -1;
 			unsigned int totUserDevices = 0;
+			bool bShowScenes = true;
 			if (bHaveUser)
 			{
 				iUser = FindUser(m_pWebEm->m_actualuser.c_str());
@@ -7573,6 +7749,7 @@ namespace http {
 						szQuery << "SELECT DeviceRowID FROM SharedDevices WHERE (SharedUserID == " << m_users[iUser].ID << ")";
 						result = m_sql.query(szQuery.str());
 						totUserDevices = (unsigned int)result.size();
+						bShowScenes = (m_users[iUser].ActiveTabs&(1 << 1))!=0;
 					}
 				}
 			}
@@ -7583,77 +7760,80 @@ namespace http {
 			int ii = 0;
 			if (rfilter == "all")
 			{
-				//also add scenes
-				szQuery.clear();
-				szQuery.str("");
-
-				if (rowid != "")
-					szQuery << "SELECT ID, Name, nValue, LastUpdate, Favorite, SceneType, Protected, 0 as XOffset, 0 as YOffset, 0 as PlanID FROM Scenes WHERE (ID==" << rowid << ")";
-				else if ((planID != "") && (planID != "0"))
-					szQuery << "SELECT A.ID, A.Name, A.nValue, A.LastUpdate, A.Favorite, A.SceneType, A.Protected, B.XOffset, B.YOffset, B.PlanID FROM Scenes as A, DeviceToPlansMap as B WHERE (B.PlanID==" << planID << ") AND (B.DeviceRowID==a.ID) AND (B.DevSceneType==1) ORDER BY B.[Order]";
-				else if ((floorID != "") && (floorID != "0"))
-					szQuery << "SELECT A.ID, A.Name, A.nValue, A.LastUpdate, A.Favorite, A.SceneType, A.Protected, B.XOffset, B.YOffset, B.PlanID FROM Scenes as A, DeviceToPlansMap as B, Plans as C WHERE (C.FloorplanID==" << floorID << ") AND (C.ID==B.PlanID) AND(B.DeviceRowID==a.ID) AND (B.DevSceneType==1) ORDER BY B.[Order]";
-				else
-					szQuery << "SELECT ID, Name, nValue, LastUpdate, Favorite, SceneType, Protected, 0 as XOffset, 0 as YOffset, 0 as PlanID FROM Scenes ORDER BY " << szOrderBy;
-
-				result = m_sql.query(szQuery.str());
-				if (result.size() > 0)
+				if (bShowScenes)
 				{
-					std::vector<std::vector<std::string> >::const_iterator itt;
-					for (itt = result.begin(); itt != result.end(); ++itt)
+					//add scenes
+					szQuery.clear();
+					szQuery.str("");
+
+					if (rowid != "")
+						szQuery << "SELECT ID, Name, nValue, LastUpdate, Favorite, SceneType, Protected, 0 as XOffset, 0 as YOffset, 0 as PlanID FROM Scenes WHERE (ID==" << rowid << ")";
+					else if ((planID != "") && (planID != "0"))
+						szQuery << "SELECT A.ID, A.Name, A.nValue, A.LastUpdate, A.Favorite, A.SceneType, A.Protected, B.XOffset, B.YOffset, B.PlanID FROM Scenes as A, DeviceToPlansMap as B WHERE (B.PlanID==" << planID << ") AND (B.DeviceRowID==a.ID) AND (B.DevSceneType==1) ORDER BY B.[Order]";
+					else if ((floorID != "") && (floorID != "0"))
+						szQuery << "SELECT A.ID, A.Name, A.nValue, A.LastUpdate, A.Favorite, A.SceneType, A.Protected, B.XOffset, B.YOffset, B.PlanID FROM Scenes as A, DeviceToPlansMap as B, Plans as C WHERE (C.FloorplanID==" << floorID << ") AND (C.ID==B.PlanID) AND(B.DeviceRowID==a.ID) AND (B.DevSceneType==1) ORDER BY B.[Order]";
+					else
+						szQuery << "SELECT ID, Name, nValue, LastUpdate, Favorite, SceneType, Protected, 0 as XOffset, 0 as YOffset, 0 as PlanID FROM Scenes ORDER BY " << szOrderBy;
+
+					result = m_sql.query(szQuery.str());
+					if (result.size() > 0)
 					{
-						std::vector<std::string> sd = *itt;
-						std::string sLastUpdate = sd[3];
-
-						if (iLastUpdate != 0)
+						std::vector<std::vector<std::string> >::const_iterator itt;
+						for (itt = result.begin(); itt != result.end(); ++itt)
 						{
-							tLastUpdate.tm_isdst = tm1.tm_isdst;
-							tLastUpdate.tm_year = atoi(sLastUpdate.substr(0, 4).c_str()) - 1900;
-							tLastUpdate.tm_mon = atoi(sLastUpdate.substr(5, 2).c_str()) - 1;
-							tLastUpdate.tm_mday = atoi(sLastUpdate.substr(8, 2).c_str());
-							tLastUpdate.tm_hour = atoi(sLastUpdate.substr(11, 2).c_str());
-							tLastUpdate.tm_min = atoi(sLastUpdate.substr(14, 2).c_str());
-							tLastUpdate.tm_sec = atoi(sLastUpdate.substr(17, 2).c_str());
-							time_t cLastUpdate = mktime(&tLastUpdate);
-							if (cLastUpdate <= iLastUpdate)
-								continue;
-						}
+							std::vector<std::string> sd = *itt;
+							std::string sLastUpdate = sd[3];
 
-						int nValue = atoi(sd[2].c_str());
-						unsigned char favorite = atoi(sd[4].c_str());
-						unsigned char scenetype = atoi(sd[5].c_str());
-						int iProtected = atoi(sd[6].c_str());
+							if (iLastUpdate != 0)
+							{
+								tLastUpdate.tm_isdst = tm1.tm_isdst;
+								tLastUpdate.tm_year = atoi(sLastUpdate.substr(0, 4).c_str()) - 1900;
+								tLastUpdate.tm_mon = atoi(sLastUpdate.substr(5, 2).c_str()) - 1;
+								tLastUpdate.tm_mday = atoi(sLastUpdate.substr(8, 2).c_str());
+								tLastUpdate.tm_hour = atoi(sLastUpdate.substr(11, 2).c_str());
+								tLastUpdate.tm_min = atoi(sLastUpdate.substr(14, 2).c_str());
+								tLastUpdate.tm_sec = atoi(sLastUpdate.substr(17, 2).c_str());
+								time_t cLastUpdate = mktime(&tLastUpdate);
+								if (cLastUpdate <= iLastUpdate)
+									continue;
+							}
 
-						if (scenetype == 0)
-						{
-							root["result"][ii]["Type"] = "Scene";
+							int nValue = atoi(sd[2].c_str());
+							unsigned char favorite = atoi(sd[4].c_str());
+							unsigned char scenetype = atoi(sd[5].c_str());
+							int iProtected = atoi(sd[6].c_str());
+
+							if (scenetype == 0)
+							{
+								root["result"][ii]["Type"] = "Scene";
+							}
+							else
+							{
+								root["result"][ii]["Type"] = "Group";
+							}
+							root["result"][ii]["idx"] = sd[0];
+							root["result"][ii]["Name"] = sd[1];
+							root["result"][ii]["Favorite"] = favorite;
+							root["result"][ii]["Protected"] = (iProtected != 0);
+							root["result"][ii]["LastUpdate"] = sLastUpdate;
+							root["result"][ii]["TypeImg"] = "lightbulb";
+							if (nValue == 0)
+								root["result"][ii]["Status"] = "Off";
+							else if (nValue == 1)
+								root["result"][ii]["Status"] = "On";
+							else
+								root["result"][ii]["Status"] = "Mixed";
+							unsigned long long camIDX = m_mainworker.m_cameras.IsDevSceneInCamera(1, sd[0]);
+							root["result"][ii]["UsedByCamera"] = (camIDX != 0) ? true : false;
+							if (camIDX != 0) {
+								std::stringstream scidx;
+								scidx << camIDX;
+								root["result"][ii]["CameraIdx"] = scidx.str();
+							}
+							root["result"][ii]["XOffset"] = atoi(sd[7].c_str());
+							root["result"][ii]["YOffset"] = atoi(sd[8].c_str());
+							ii++;
 						}
-						else
-						{
-							root["result"][ii]["Type"] = "Group";
-						}
-						root["result"][ii]["idx"] = sd[0];
-						root["result"][ii]["Name"] = sd[1];
-						root["result"][ii]["Favorite"] = favorite;
-						root["result"][ii]["Protected"] = (iProtected != 0);
-						root["result"][ii]["LastUpdate"] = sLastUpdate;
-						root["result"][ii]["TypeImg"] = "lightbulb";
-						if (nValue == 0)
-							root["result"][ii]["Status"] = "Off";
-						else if (nValue == 1)
-							root["result"][ii]["Status"] = "On";
-						else
-							root["result"][ii]["Status"] = "Mixed";
-						unsigned long long camIDX = m_mainworker.m_cameras.IsDevSceneInCamera(1, sd[0]);
-						root["result"][ii]["UsedByCamera"] = (camIDX != 0) ? true : false;
-						if (camIDX != 0) {
-							std::stringstream scidx;
-							scidx << camIDX;
-							root["result"][ii]["CameraIdx"] = scidx.str();
-						}
-						root["result"][ii]["XOffset"] = atoi(sd[7].c_str());
-						root["result"][ii]["YOffset"] = atoi(sd[8].c_str());
-						ii++;
 					}
 				}
 			}
@@ -7776,7 +7956,7 @@ namespace http {
 
 					unsigned char dType = atoi(sd[5].c_str());
 					unsigned char dSubType = atoi(sd[6].c_str());
-					unsigned char dUnit = atoi(sd[2].c_str());;
+					unsigned char dUnit = atoi(sd[2].c_str());			// For Sonos...
 					unsigned char used = atoi(sd[4].c_str());
 					int nValue = atoi(sd[9].c_str());
 					std::string sValue = sd[10];
@@ -7849,6 +8029,7 @@ namespace http {
 								(dType != pTypeLighting6) &&
 								(dType != pTypeLimitlessLights) &&
 								(dType != pTypeSecurity1) &&
+								(dType != pTypeEvohome) &&
 								(dType != pTypeCurtain) &&
 								(dType != pTypeBlinds) &&
 								(dType != pTypeRFY) &&
@@ -7857,7 +8038,8 @@ namespace http {
 								(dType != pTypeThermostat3) &&
 								(dType != pTypeRemote) &&
 								(dType != pTypeChime) &&
-								(!((dType == pTypeRego6XXValue) && (dSubType == sTypeRego6XXStatus)))
+								(!((dType == pTypeRego6XXValue) && (dSubType == sTypeRego6XXStatus))) &&
+								(!((dType == pTypeRadiator1) && (dSubType == sTypeSmartwaresSwitchRadiator)))
 								)
 								continue;
 						}
@@ -7869,6 +8051,8 @@ namespace http {
 								(dType != pTypeTEMP_HUM) &&
 								(dType != pTypeTEMP_HUM_BARO) &&
 								(dType != pTypeTEMP_BARO) &&
+								(dType != pTypeEvohomeZone) &&
+								(dType != pTypeEvohomeWater) &&
 								(!((dType == pTypeWIND) && (dSubType == sTypeWIND4))) &&
 								(!((dType == pTypeWIND) && (dSubType == sTypeWINDNoTemp))) &&
 								(!((dType == pTypeUV) && (dSubType == sTypeUV3))) &&
@@ -7899,6 +8083,7 @@ namespace http {
 								(!((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorAD))) &&
 								(!((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorVolt))) &&
 								(!((dType == pTypeGeneral) && (dSubType == sTypeVoltage))) &&
+								(!((dType == pTypeGeneral) && (dSubType == sTypeCurrent))) &&
 								(!((dType == pTypeGeneral) && (dSubType == sTypeTextStatus))) &&
 								(!((dType == pTypeGeneral) && (dSubType == sTypeAlert))) &&
 								(!((dType == pTypeGeneral) && (dSubType == sTypePressure))) &&
@@ -7921,7 +8106,8 @@ namespace http {
 								(dType != pTypeUsage) &&
 								(!((dType == pTypeRego6XXValue) && (dSubType == sTypeRego6XXCounter))) &&
 								(!((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint))) &&
-								(dType != pTypeWEIGHT)
+								(dType != pTypeWEIGHT)&&
+								(!((dType == pTypeRadiator1) && (dSubType == sTypeSmartwares)))
 								)
 								continue;
 						}
@@ -8047,7 +8233,8 @@ namespace http {
 						(dType == pTypeChime) ||
 						(dType == pTypeThermostat2) ||
 						(dType == pTypeThermostat3) ||
-						(dType == pTypeRemote)
+						(dType == pTypeRemote)||
+						((dType == pTypeRadiator1) && (dSubType == sTypeSmartwaresSwitchRadiator))
 						)
 					{
 						//add light details
@@ -8250,8 +8437,8 @@ namespace http {
 							// Sonos / UPnP - Future: create switchtype STYPE_UPnP and put this there
 							root["result"][ii]["TypeImg"] = "program_mini";
 							root["result"][ii]["InternalState"] = (IsLightSwitchOn(lstatus) == true) ? "Playing" : "Stopped";
-//							root["result"][ii]["StrParam1"] = std::string(sd[21]); // base64_decode(strParam1);
-//							root["result"][ii]["StrParam2"] = std::string(sd[22]); // base64_decode(strParam2);
+							root["result"][ii]["StrParam1"] = std::string(sd[21]);
+							root["result"][ii]["StrParam2"] = std::string(sd[22]);
 	
 						}
 
@@ -8304,6 +8491,82 @@ namespace http {
 						sprintf(szData, "%s", lstatus.c_str());
 						root["result"][ii]["Data"] = szData;
 						root["result"][ii]["HaveTimeout"] = false;
+					}
+					else if (dType == pTypeEvohome)
+					{
+						std::string lstatus="";
+						int llevel=0;
+						bool bHaveDimmer=false;
+						bool bHaveGroupCmd=false;
+						int maxDimLevel=0;
+
+						GetLightStatus(dType, dSubType, switchtype,nValue, sValue, lstatus, llevel, bHaveDimmer, maxDimLevel, bHaveGroupCmd);
+
+						root["result"][ii]["Status"]=lstatus;
+						root["result"][ii]["HaveDimmer"]=bHaveDimmer;
+						root["result"][ii]["MaxDimLevel"]=maxDimLevel;
+						root["result"][ii]["HaveGroupCmd"]=bHaveGroupCmd;
+						root["result"][ii]["SwitchType"]="evohome";
+						root["result"][ii]["SwitchTypeVal"]=switchtype; //was 0?;
+						root["result"][ii]["TypeImg"]="override_mini";
+						root["result"][ii]["StrParam1"]=strParam1;
+						root["result"][ii]["StrParam2"]=strParam2;
+						root["result"][ii]["Protected"]=(iProtected!=0);
+
+						sprintf(szData,"%s", lstatus.c_str());
+						root["result"][ii]["Data"]=szData;
+						root["result"][ii]["HaveTimeout"]=false;
+					}
+					else if ((dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater))
+					{
+						root["result"][ii]["HaveTimeout"]=bHaveTimeout;
+						root["result"][ii]["TypeImg"]="override_mini";
+						
+						std::vector<std::string> strarray;
+						StringSplit(sValue, ";", strarray);
+						if (strarray.size()>=3)
+						{
+							int i=0;
+							root["result"][ii]["AddjValue"]=AddjValue;
+							root["result"][ii]["AddjMulti"]=AddjMulti;
+							root["result"][ii]["AddjValue2"]=AddjValue2;
+							root["result"][ii]["AddjMulti2"]=AddjMulti2;
+
+							double tempCelcius=atof(strarray[i++].c_str());
+							double temp=ConvertTemperature(tempCelcius,tempsign);
+							double tempSetPoint;
+							root["result"][ii]["Temp"]=temp;
+							if (dType == pTypeEvohomeZone)
+							{
+								tempCelcius=atof(strarray[i++].c_str());
+								tempSetPoint=ConvertTemperature(tempCelcius,tempsign);
+								root["result"][ii]["SetPoint"]=tempSetPoint;
+							}
+							else
+								root["result"][ii]["State"]=strarray[i++];
+						
+							std::string strstatus=strarray[i++];
+							root["result"][ii]["Status"]=strstatus;
+							
+							if ((dType == pTypeEvohomeZone || dType == pTypeEvohomeWater) && strarray.size()>=4)
+							{
+								root["result"][ii]["Until"]=strarray[i++];
+							}
+							if (dType == pTypeEvohomeZone)
+							{
+								if (strarray.size()>=4)
+									sprintf(szData,"%.1f %c, (%.1f %c), %s until %s", temp,tempsign,tempSetPoint,tempsign,strstatus.c_str(),strarray[3].c_str());
+								else
+									sprintf(szData,"%.1f %c, (%.1f %c), %s", temp,tempsign,tempSetPoint,tempsign,strstatus.c_str());
+							}
+							else
+								if (strarray.size()>=4)
+									sprintf(szData,"%.1f %c, %s, %s until %s", temp,tempsign,strarray[1].c_str(),strstatus.c_str(),strarray[3].c_str());
+								else
+									sprintf(szData,"%.1f %c, %s, %s", temp,tempsign,strarray[1].c_str(),strstatus.c_str());
+							root["result"][ii]["Data"]=szData;
+							root["result"][ii]["HaveTimeout"]=bHaveTimeout;
+						}
 					}
 					else if ((dType == pTypeTEMP) || (dType == pTypeRego6XXTemp))
 					{
@@ -9188,6 +9451,22 @@ namespace http {
 							root["result"][ii]["TypeImg"] = "override_mini";
 						}
 					}
+					else if (dType == pTypeRadiator1)
+					{
+						if (dSubType == sTypeSmartwares)
+						{
+							bHasTimers = m_sql.HasTimers(sd[0]);
+
+							double tempCelcius = atof(sValue.c_str());
+							double temp = ConvertTemperature(tempCelcius, tempsign);
+
+							sprintf(szTmp, "%.1f", temp);
+							root["result"][ii]["Data"] = szTmp;
+							root["result"][ii]["SetPoint"] = szTmp;
+							root["result"][ii]["HaveTimeout"] = bHaveTimeout;
+							root["result"][ii]["TypeImg"] = "override_mini";
+						}
+					}
 					else if (dType == pTypeGeneral)
 					{
 						if (dSubType == sTypeVisibility)
@@ -9273,6 +9552,14 @@ namespace http {
 							root["result"][ii]["TypeImg"] = "current";
 							root["result"][ii]["HaveTimeout"] = bHaveTimeout;
 							root["result"][ii]["Voltage"] = atof(sValue.c_str());
+						}
+						else if (dSubType == sTypeCurrent)
+						{
+							sprintf(szData, "%.3f A", atof(sValue.c_str()));
+							root["result"][ii]["Data"] = szData;
+							root["result"][ii]["TypeImg"] = "current";
+							root["result"][ii]["HaveTimeout"] = bHaveTimeout;
+							root["result"][ii]["Current"] = atof(sValue.c_str());
 						}
 						else if (dSubType == sTypeTextStatus)
 						{
@@ -9708,6 +9995,94 @@ namespace http {
 			m_sql.query(szTmp);
 		}
 
+		void CWebServer::RType_CreateEvohomeSensor(Json::Value &root)
+		{
+			if (m_pWebEm->m_actualuser_rights != 2)
+			{
+				//No admin user, and not allowed to be here
+				return;
+			}
+
+			std::string idx = m_pWebEm->FindValue("idx");
+			std::string ssensortype = m_pWebEm->FindValue("sensortype");
+			if ((idx == "") || (ssensortype == ""))
+				return;
+
+			bool bCreated = false;
+			int iSensorType = atoi(ssensortype.c_str());
+
+			int HwdID = atoi(idx.c_str());
+
+			//Make a unique number for ID
+			std::stringstream szQuery;
+			std::vector<std::vector<std::string> > result;
+			szQuery << "SELECT MAX(ID) FROM DeviceStatus";
+			result = m_sql.query(szQuery.str());
+
+			unsigned long nid = 1; //could be the first device ever
+
+			if (result.size() > 0)
+			{
+				nid = atol(result[0][0].c_str());
+			}
+			nid += 92000;
+			char ID[40];
+			sprintf(ID, "%ld", nid);
+			
+			//get zone count
+			szQuery.clear();
+			szQuery.str("");
+			szQuery << "SELECT COUNT(*) FROM DeviceStatus WHERE (HardwareID == " << HwdID << ") AND (Type==" << (int)iSensorType << ")";
+			result = m_sql.query(szQuery.str());
+			
+			int nDevCount=0;
+			if (result.size() > 0)
+			{
+				nDevCount = atol(result[0][0].c_str());
+			}
+
+			std::string devname;
+
+			switch (iSensorType)
+			{
+			case pTypeEvohome: //Controller...should be 1 controller per hardware
+				if (nDevCount>=1)
+				{
+					root["status"] = "ERR";
+					root["message"] = "Maximum number of controllers reached";
+					return;
+				}
+				m_sql.UpdateValue(HwdID, ID, 0, pTypeEvohome, sTypeEvohome, 10, 255, 0, "Normal", devname);
+				bCreated = true;
+				break;
+			case pTypeEvohomeZone://max of 12 zones
+				if (nDevCount>=12)
+				{
+					root["status"] = "ERR";
+					root["message"] = "Maximum number of supported zones reached";
+					return;
+				}
+				m_sql.UpdateValue(HwdID, ID, nDevCount+1, pTypeEvohomeZone, sTypeEvohomeZone, 10, 255, 0, "0.0;0.0;Auto", devname);
+				bCreated = true;
+				break;
+			case pTypeEvohomeWater://DHW...should be 1 per hardware
+				if (nDevCount>=1)
+				{
+					root["status"] = "ERR";
+					root["message"] = "Maximum number of DHW zones reached";
+					return;
+				}
+				m_sql.UpdateValue(HwdID, ID, 1, pTypeEvohomeWater, sTypeEvohomeWater, 10, 255, 50, "0.0;Off;Auto", devname);
+				bCreated = true;
+				break;
+			}
+			if (bCreated)
+			{
+				root["status"] = "OK";
+				root["title"] = "CreateEvohomeSensor";
+			}
+		}
+
 		void CWebServer::RType_CreateVirtualSensor(Json::Value &root)
 		{
 			if (m_pWebEm->m_actualuser_rights != 2)
@@ -9800,6 +10175,11 @@ namespace http {
 				m_sql.UpdateValue(HwdID, ID, 1, pTypeThermostat, sTypeThermSetpoint, 12, 255, 0, "20.5", devname);
 				bCreated = true;
 				break;
+			case 9:
+				//Current/Ampere
+				m_sql.UpdateValue(HwdID, ID, 1, pTypeCURRENT, sTypeELEC1, 12, 255, 0, "0.0;0.0;0.0", devname);
+				bCreated = true;
+				break;
 			case pTypeTEMP:
 				m_sql.UpdateValue(HwdID, ID, 1, pTypeTEMP, sTypeTEMP1, 10, 255, 0, "0.0", devname);
 				bCreated = true;
@@ -9852,12 +10232,23 @@ namespace http {
 			}
 		}
 
+		bool compareIconsByName(const http::server::CWebServer::_tCustomIcon &a, const http::server::CWebServer::_tCustomIcon &b)
+		{
+			return a.Title < b.Title;
+		}
+
 		void CWebServer::RType_CustomLightIcons(Json::Value &root)
 		{
 			std::vector<_tCustomIcon>::const_iterator itt;
 			int ii = 0;
-			for (itt = m_custom_light_icons.begin(); itt != m_custom_light_icons.end(); ++itt)
+
+			std::vector<_tCustomIcon> temp_custom_light_icons = m_custom_light_icons;
+			//Sort by name
+			std::sort(temp_custom_light_icons.begin(), temp_custom_light_icons.end(), compareIconsByName);
+
+			for (itt = temp_custom_light_icons.begin(); itt != temp_custom_light_icons.end(); ++itt)
 			{
+				root["result"][ii]["idx"] = itt->idx;
 				root["result"][ii]["imageSrc"] = itt->RootFile;
 				root["result"][ii]["text"] = itt->Title;
 				root["result"][ii]["description"] = itt->Description;
@@ -9976,7 +10367,7 @@ namespace http {
 
 			szQuery.clear();
 			szQuery.str("");
-			szQuery << "SELECT ID, Name, ImageFile, [Order] FROM Floorplans ORDER BY [Order]";
+			szQuery << "SELECT ID, Name, ImageFile, ScaleFactor, [Order] FROM Floorplans ORDER BY [Order]";
 			result2 = m_sql.query(szQuery.str());
 			if (result2.size() > 0)
 			{
@@ -9989,7 +10380,8 @@ namespace http {
 					root["result"][ii]["idx"] = sd[0];
 					root["result"][ii]["Name"] = sd[1];
 					root["result"][ii]["Image"] = sd[2];
-					root["result"][ii]["Order"] = sd[3];
+					root["result"][ii]["ScaleFactor"] = sd[3];
+					root["result"][ii]["Order"] = sd[4];
 
 					unsigned int totPlans = 0;
 
@@ -11443,6 +11835,7 @@ namespace http {
 			}
 
 			std::string idx = m_pWebEm->FindValue("idx");
+			std::string deviceid = m_pWebEm->FindValue("deviceid");
 			std::string name = m_pWebEm->FindValue("name");
 			std::string sused = m_pWebEm->FindValue("used");
 			std::string sswitchtype = m_pWebEm->FindValue("switchtype");
@@ -11452,11 +11845,15 @@ namespace http {
 			std::string addjvalue2 = m_pWebEm->FindValue("addjvalue2");
 			std::string addjmulti2 = m_pWebEm->FindValue("addjmulti2");
 			std::string setPoint = m_pWebEm->FindValue("setpoint");
+			std::string state = m_pWebEm->FindValue("state");
+			std::string mode = m_pWebEm->FindValue("mode");
+			std::string until = m_pWebEm->FindValue("until");
 			std::string clock = m_pWebEm->FindValue("clock");
 			std::string tmode = m_pWebEm->FindValue("tmode");
 			std::string fmode = m_pWebEm->FindValue("fmode");
 			std::string sCustomImage = m_pWebEm->FindValue("customimage");
 
+			std::string strunit = m_pWebEm->FindValue("unit");
 			std::string strParam1 = base64_decode(m_pWebEm->FindValue("strparam1"));
 			std::string strParam2 = base64_decode(m_pWebEm->FindValue("strparam2"));
 			std::string tmpstr = m_pWebEm->FindValue("protected");
@@ -11495,7 +11892,36 @@ namespace http {
 
 			std::stringstream szQuery;
 			std::vector<std::vector<std::string> > result;
-			if (setPoint != "")
+	
+			szQuery << "SELECT HardwareID, DeviceID,Unit,Type,SubType,SwitchType,sValue,StrParam1,StrParam2,Protected FROM DeviceStatus WHERE (ID == " << idx << ")";
+			result=m_sql.query(szQuery.str());
+			if (result.size()<1)
+				return;
+			szQuery.clear();
+			szQuery.str("");
+			std::vector<std::string> sd=result[0];
+				
+			//FIXME we need a way to make sure our script parameters are not overwritten
+			//This will work except where we want to update to ""
+			if(strParam1=="")
+				strParam1=sd[7];
+			if(strParam2=="")
+				strParam2=sd[8];
+			if(tmpstr=="") //strprotected
+				iProtected = (sd[9] == "true" || sd[9]=="1") ? 1 : 0;
+
+			int HardwareID = atoi(sd[0].c_str());
+			unsigned long ID;
+			std::stringstream s_strid;
+			s_strid << std::hex << sd[1];
+			s_strid >> ID;
+			unsigned char Unit=atoi(sd[2].c_str());
+			unsigned char dType=atoi(sd[3].c_str());
+			unsigned char dSubType=atoi(sd[4].c_str());
+			
+			int nEvoMode=0;
+			
+			if (setPoint != "" || state!="")
 			{
 				double tempcelcius = atof(setPoint.c_str());
 				if (m_sql.m_tempunit == TEMPUNIT_F)
@@ -11504,10 +11930,20 @@ namespace http {
 					tempcelcius = (tempcelcius - 32) / 1.8;
 				}
 				sprintf(szTmp, "%.2f", tempcelcius);
-				szQuery << "UPDATE DeviceStatus SET Used=" << used << ", sValue='" << szTmp << "' WHERE (ID == " << idx << ")";
-				m_sql.query(szQuery.str());
-				szQuery.clear();
-				szQuery.str("");
+				if(dType == pTypeEvohomeZone || dType == pTypeEvohomeWater)//sql update now done in setsetpoint for evohome devices
+				{
+					if(mode=="PermanentOverride")
+						nEvoMode=1;
+					else if(mode=="TemporaryOverride")
+						nEvoMode=2;
+				}
+				else
+				{
+					szQuery << "UPDATE DeviceStatus SET Used=" << used << ", sValue='" << szTmp << "' WHERE (ID == " << idx << ")";
+					m_sql.query(szQuery.str());
+					szQuery.clear();
+					szQuery.str("");
+				}
 			}
 			if (name == "")
 			{
@@ -11522,12 +11958,13 @@ namespace http {
 			}
 			result = m_sql.query(szQuery.str());
 
+			//FIXME we need to make sure any script parameters are not overwritten (see above)
 			szQuery.clear();
 			szQuery.str("");
 			szQuery << "UPDATE DeviceStatus SET StrParam1='" << strParam1 << "', StrParam2='" << strParam2 << "', Protected=" << iProtected << " WHERE (ID == " << idx << ")";
 			result = m_sql.query(szQuery.str());
 
-			if (setPoint != "")
+			if (setPoint != "" || state!="")
 			{
 				int urights = 3;
 				if (bHaveUser)
@@ -11542,7 +11979,12 @@ namespace http {
 				}
 				if (urights < 1)
 					return;
-				m_mainworker.SetSetPoint(idx, static_cast<float>(atof(setPoint.c_str())));
+				if(dType == pTypeEvohomeWater)
+					m_mainworker.SetSetPoint(idx, (state=="On")?1.0f:0.0f, nEvoMode, until);//FIXME float not guaranteed precise?
+				else if(dType == pTypeEvohomeZone)
+					m_mainworker.SetSetPoint(idx, static_cast<float>(atof(setPoint.c_str())), nEvoMode, until);
+				else
+					m_mainworker.SetSetPoint(idx, static_cast<float>(atof(setPoint.c_str())));
 			}
 			else if (clock != "")
 			{
@@ -11596,7 +12038,21 @@ namespace http {
 				m_mainworker.SetZWaveThermostatFanMode(idx, atoi(fmode.c_str()));
 			}
 
-
+			if (strunit != "")
+			{
+				szQuery.clear();
+				szQuery.str("");
+				szQuery << "UPDATE DeviceStatus SET Unit=" << strunit << " WHERE (ID == " << idx << ")";
+				result = m_sql.query(szQuery.str());
+			}
+			//FIXME evohome ...we need the zone id to update the correct zone...but this should be ok as a generic call?
+			if (deviceid != "")
+			{
+				szQuery.clear();
+				szQuery.str("");
+				szQuery << "UPDATE DeviceStatus SET DeviceID='" << deviceid << "' WHERE (ID == " << idx << ")";
+				result = m_sql.query(szQuery.str());
+			}
 			if (addjvalue != "")
 			{
 				double faddjvalue = atof(addjvalue.c_str());
@@ -12230,6 +12686,7 @@ namespace http {
 				(dType != pTypeLighting6) &&
 				(dType != pTypeLimitlessLights) &&
 				(dType != pTypeSecurity1) &&
+				(dType != pTypeEvohome) &&
 				(dType != pTypeCurtain) &&
 				(dType != pTypeBlinds) &&
 				(dType != pTypeRFY) &&
@@ -12237,7 +12694,8 @@ namespace http {
 				(dType != pTypeChime) &&
 				(dType != pTypeThermostat2) &&
 				(dType != pTypeThermostat3) &&
-				(dType != pTypeRemote)
+				(dType != pTypeRemote)&&
+				(!((dType == pTypeRadiator1) && (dSubType == sTypeSmartwaresSwitchRadiator)))
 				)
 				return; //no light device! we should not be here!
 
@@ -12385,6 +12843,7 @@ namespace http {
 						((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorAD)) ||
 						((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorVolt)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+						((dType == pTypeGeneral) && (dSubType == sTypeCurrent)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypePressure)) ||
 						(dType == pTypeLux) ||
 						(dType == pTypeWEIGHT) ||
@@ -12411,7 +12870,7 @@ namespace http {
 
 					szQuery.clear();
 					szQuery.str("");
-					szQuery << "SELECT Temperature, Chill, Humidity, Barometer, Date FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << ") ORDER BY Date ASC";
+					szQuery << "SELECT Temperature, Chill, Humidity, Barometer, Date, SetPoint FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << ") ORDER BY Date ASC";
 					result = m_sql.query(szQuery.str());
 					if (result.size() > 0)
 					{
@@ -12434,7 +12893,9 @@ namespace http {
 								(dType == pTypeThermostat1) ||
 								((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorTemp)) ||
 								((dType == pTypeGeneral) && (dSubType == sTypeSystemTemp)) ||
-								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint))
+								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint)) ||
+								(dType == pTypeEvohomeZone) ||
+								(dType == pTypeEvohomeWater)
 								)
 							{
 								double tvalue = ConvertTemperature(atof(sd[0].c_str()), tempsign);
@@ -12472,6 +12933,11 @@ namespace http {
 									sprintf(szTmp, "%.1f", atof(sd[3].c_str()) / 10.0f);
 									root["result"][ii]["ba"] = szTmp;
 								}
+							}
+							if((dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater))
+							{
+								double se = ConvertTemperature(atof(sd[5].c_str()), tempsign);
+								root["result"][ii]["se"] = se;
 							}
 
 							ii++;
@@ -12693,15 +13159,20 @@ namespace http {
 						((dType == pTypeGeneral) && (dSubType == sTypeVisibility)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeSolarRadiation)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+						((dType == pTypeGeneral) && (dSubType == sTypeCurrent)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypePressure))
 						)
 					{//day
 						root["status"] = "OK";
 						root["title"] = "Graph " + sensor + " " + srange;
 						float vdiv = 10.0f;
-						if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+						if (
+							((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+							((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+							)
+						{
 							vdiv = 1000.0f;
-
+						}
 						szQuery.clear();
 						szQuery.str("");
 						szQuery << "SELECT Value, Date FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << ") ORDER BY Date ASC";
@@ -12719,6 +13190,8 @@ namespace http {
 								if (metertype == 1)
 									fValue *= 0.6214f;
 								if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+									sprintf(szTmp, "%.3f", fValue);
+								else if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
 									sprintf(szTmp, "%.3f", fValue);
 								else
 									sprintf(szTmp, "%.1f", fValue);
@@ -13920,7 +14393,7 @@ namespace http {
 					//Actual Year
 					szQuery.clear();
 					szQuery.str("");
-					szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Temp_Avg, Date FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << "') ORDER BY Date ASC";
+					szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Temp_Avg, Date, SetPoint_Min, SetPoint_Max, SetPoint_Avg FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << "') ORDER BY Date ASC";
 					result = m_sql.query(szQuery.str());
 					int ii = 0;
 					if (result.size() > 0)
@@ -13937,7 +14410,8 @@ namespace http {
 								((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorTemp)) ||
 								((dType == pTypeUV) && (dSubType == sTypeUV3)) ||
 								((dType == pTypeGeneral) && (dSubType == sTypeSystemTemp)) ||
-								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint))
+								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint)) ||
+								(dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater)
 								)
 							{
 								bool bOK = true;
@@ -13990,13 +14464,22 @@ namespace http {
 									root["result"][ii]["ba"] = szTmp;
 								}
 							}
+							if((dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater))
+							{
+								double sm = ConvertTemperature(atof(sd[8].c_str()), tempsign);
+								double sx = ConvertTemperature(atof(sd[9].c_str()), tempsign);
+								double se = ConvertTemperature(atof(sd[10].c_str()), tempsign);
+								root["result"][ii]["sm"] = sm;
+								root["result"][ii]["se"] = se;
+								root["result"][ii]["sx"] = sx;
+							}
 							ii++;
 						}
 					}
 					//add today (have to calculate it)
 					szQuery.clear();
 					szQuery.str("");
-					szQuery << "SELECT MIN(Temperature), MAX(Temperature), MIN(Chill), MAX(Chill), MAX(Humidity), MAX(Barometer), AVG(Temperature) FROM Temperature WHERE (DeviceRowID=" << idx << " AND Date>='" << szDateEnd << "')";
+					szQuery << "SELECT MIN(Temperature), MAX(Temperature), MIN(Chill), MAX(Chill), MAX(Humidity), MAX(Barometer), AVG(Temperature), MIN(SetPoint), MAX(SetPoint), AVG(SetPoint) FROM Temperature WHERE (DeviceRowID=" << idx << " AND Date>='" << szDateEnd << "')";
 					result = m_sql.query(szQuery.str());
 					if (result.size() > 0)
 					{
@@ -14007,7 +14490,8 @@ namespace http {
 							((dType == pTypeRego6XXTemp) || (dType == pTypeTEMP) || (dType == pTypeTEMP_HUM) || (dType == pTypeTEMP_HUM_BARO) || (dType == pTypeTEMP_BARO) || (dType == pTypeWIND) || (dType == pTypeThermostat1)) ||
 							((dType == pTypeUV) && (dSubType == sTypeUV3)) ||
 							((dType == pTypeWIND) && (dSubType == sTypeWIND4)) ||
-							((dType == pTypeWIND) && (dSubType == sTypeWINDNoTemp))
+							((dType == pTypeWIND) && (dSubType == sTypeWINDNoTemp)) ||
+							(dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater)
 							)
 						{
 							double te = ConvertTemperature(atof(sd[1].c_str()), tempsign);
@@ -14053,12 +14537,21 @@ namespace http {
 								root["result"][ii]["ba"] = szTmp;
 							}
 						}
+						if((dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater))
+						{
+							double sx = ConvertTemperature(atof(sd[8].c_str()), tempsign);
+							double sm = ConvertTemperature(atof(sd[7].c_str()), tempsign);
+							double se = ConvertTemperature(atof(sd[9].c_str()), tempsign);
+							root["result"][ii]["se"] = se;
+							root["result"][ii]["sm"] = sm;
+							root["result"][ii]["sx"] = sx;
+						}
 						ii++;
 					}
 					//Previous Year
 					szQuery.clear();
 					szQuery.str("");
-					szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Temp_Avg, Date FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStartPrev << "' AND Date<='" << szDateEndPrev << "') ORDER BY Date ASC";
+					szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Temp_Avg, Date, SetPoint_Min, SetPoint_Max, SetPoint_Avg FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStartPrev << "' AND Date<='" << szDateEndPrev << "') ORDER BY Date ASC";
 					result = m_sql.query(szQuery.str());
 					if (result.size() > 0)
 					{
@@ -14075,7 +14568,8 @@ namespace http {
 								((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorTemp)) ||
 								((dType == pTypeUV) && (dSubType == sTypeUV3)) ||
 								((dType == pTypeGeneral) && (dSubType == sTypeSystemTemp)) ||
-								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint))
+								((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint)) ||
+								(dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater)
 								)
 							{
 								bool bOK = true;
@@ -14524,6 +15018,7 @@ namespace http {
 						((dType == pTypeGeneral) && (dSubType == sTypeVisibility)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeSolarRadiation)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+						((dType == pTypeGeneral) && (dSubType == sTypeCurrent)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypePressure))
 						)
 					{//month/year
@@ -14531,8 +15026,13 @@ namespace http {
 						root["title"] = "Graph " + sensor + " " + srange;
 
 						float vdiv = 10.0f;
-						if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+						if (
+							((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+							((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+							)
+						{
 							vdiv = 1000.0f;
+						}
 
 						szQuery << "SELECT Value1,Value2, Date FROM " << dbasetable << " WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << "') ORDER BY Date ASC";
 						result = m_sql.query(szQuery.str());
@@ -14554,10 +15054,14 @@ namespace http {
 								}
 								if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
 									sprintf(szTmp, "%.3f", fValue1);
+								else if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+									sprintf(szTmp, "%.3f", fValue1);
 								else
 									sprintf(szTmp, "%.1f", fValue1);
 								root["result"][ii]["v_min"] = szTmp;
 								if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+									sprintf(szTmp, "%.3f", fValue2);
+								else if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
 									sprintf(szTmp, "%.3f", fValue2);
 								else
 									sprintf(szTmp, "%.1f", fValue2);
@@ -15033,12 +15537,18 @@ namespace http {
 						((dType == pTypeGeneral) && (dSubType == sTypeVisibility)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeSolarRadiation)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+						((dType == pTypeGeneral) && (dSubType == sTypeCurrent)) ||
 						((dType == pTypeGeneral) && (dSubType == sTypePressure))
 						)
 					{
 						float vdiv = 10.0f;
-						if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+						if (
+							((dType == pTypeGeneral) && (dSubType == sTypeVoltage)) ||
+							((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+							)
+						{
 							vdiv = 1000.0f;
+						}
 
 						szQuery << "SELECT MIN(Value), MAX(Value) FROM Meter WHERE (DeviceRowID=" << idx << " AND Date>='" << szDateEnd << "')";
 						result = m_sql.query(szQuery.str());
@@ -15055,10 +15565,14 @@ namespace http {
 
 							if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
 								sprintf(szTmp, "%.3f", fValue1);
+							else if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
+								sprintf(szTmp, "%.3f", fValue1);
 							else
 								sprintf(szTmp, "%.1f", fValue1);
 							root["result"][ii]["v_min"] = szTmp;
 							if ((dType == pTypeGeneral) && (dSubType == sTypeVoltage))
+								sprintf(szTmp, "%.3f", fValue2);
+							else if ((dType == pTypeGeneral) && (dSubType == sTypeCurrent))
 								sprintf(szTmp, "%.3f", fValue2);
 							else
 								sprintf(szTmp, "%.1f", fValue2);
@@ -15204,6 +15718,7 @@ namespace http {
 				std::string sgraphHum = m_pWebEm->FindValue("graphHum");
 				std::string sgraphBaro = m_pWebEm->FindValue("graphBaro");
 				std::string sgraphDew = m_pWebEm->FindValue("graphDew");
+				std::string sgraphSet = m_pWebEm->FindValue("graphSet");
 
 				if (sensor == "temp") {
 					root["status"] = "OK";
@@ -15214,6 +15729,7 @@ namespace http {
 					bool sendHum = false;
 					bool sendBaro = false;
 					bool sendDew = false;
+					bool sendSet = false;
 
 					if ((sgraphTemp == "true") &&
 						((dType == pTypeRego6XXTemp) || (dType == pTypeTEMP) || (dType == pTypeTEMP_HUM) || (dType == pTypeTEMP_HUM_BARO) || (dType == pTypeTEMP_BARO) || (dType == pTypeWIND) || (dType == pTypeThermostat1) ||
@@ -15221,11 +15737,17 @@ namespace http {
 						((dType == pTypeWIND) && (dSubType == sTypeWIND4)) ||
 						((dType == pTypeWIND) && (dSubType == sTypeWINDNoTemp)) ||
 						((dType == pTypeRFXSensor) && (dSubType == sTypeRFXSensorTemp)) ||
-						((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint))
+						((dType == pTypeThermostat) && (dSubType == sTypeThermSetpoint)) ||
+						(dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater)
 						)
 						)
 					{
 						sendTemp = true;
+					}
+					if ((sgraphSet == "true") &&
+						((dType == pTypeEvohomeZone) || (dType == pTypeEvohomeWater))) //FIXME cheat for water setpoint is just on or off
+					{
+						sendSet = true;
 					}
 					if ((sgraphChill == "true") &&
 						(((dType == pTypeWIND) && (dSubType == sTypeWIND4)) ||
@@ -15254,7 +15776,7 @@ namespace http {
 					if (sgraphtype == "1")
 					{
 						// Need to get all values of the end date so 23:59:59 is appended to the date string
-						szQuery << "SELECT Temperature, Chill, Humidity, Barometer, Date, DewPoint FROM Temperature WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << " 23:59:59') ORDER BY Date ASC";
+						szQuery << "SELECT Temperature, Chill, Humidity, Barometer, Date, DewPoint, SetPoint FROM Temperature WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << " 23:59:59') ORDER BY Date ASC";
 						result = m_sql.query(szQuery.str());
 						int ii = 0;
 						if (result.size() > 0)
@@ -15306,13 +15828,18 @@ namespace http {
 									double dp = ConvertTemperature(atof(sd[5].c_str()), tempsign);
 									root["result"][ii]["dp"] = dp;
 								}
+						if (sendSet)
+						{
+							double se = ConvertTemperature(atof(sd[6].c_str()), tempsign);
+							root["result"][ii]["se"] = se;
+						}
 								ii++;
 							}
 						}
 					}
 					else
 					{
-						szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Date, DewPoint, Temp_Avg FROM Temperature_Calendar WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << "') ORDER BY Date ASC";
+						szQuery << "SELECT Temp_Min, Temp_Max, Chill_Min, Chill_Max, Humidity, Barometer, Date, DewPoint, Temp_Avg, SetPoint_Min, SetPoint_Max, SetPoint_Avg FROM Temperature_Calendar WHERE (DeviceRowID==" << idx << " AND Date>='" << szDateStart << "' AND Date<='" << szDateEnd << "') ORDER BY Date ASC";
 						result = m_sql.query(szQuery.str());
 						int ii = 0;
 						if (result.size() > 0)
@@ -15368,6 +15895,19 @@ namespace http {
 									double dp = ConvertTemperature(atof(sd[7].c_str()), tempsign);
 									root["result"][ii]["dp"] = dp;
 								}
+								if (sendSet)
+								{
+									double sm = ConvertTemperature(atof(sd[9].c_str()), tempsign);
+									double sx = ConvertTemperature(atof(sd[10].c_str()), tempsign);
+									double se = ConvertTemperature(atof(sd[11].c_str()), tempsign);
+									root["result"][ii]["sm"] = sm;
+									root["result"][ii]["se"] = se;
+									root["result"][ii]["sx"] = sx;
+									char szTmp[1024];
+									sprintf(szTmp,"%.1f %.1f %.1f",sm,se,sx);
+									_log.Log(LOG_STATUS,szTmp);
+									
+								}
 								ii++;
 							}
 						}
@@ -15375,7 +15915,7 @@ namespace http {
 						//add today (have to calculate it)
 						szQuery.clear();
 						szQuery.str("");
-						szQuery << "SELECT MIN(Temperature), MAX(Temperature), MIN(Chill), MAX(Chill), MAX(Humidity), MAX(Barometer), MIN(DewPoint), AVG(Temperature) FROM Temperature WHERE (DeviceRowID=" << idx << " AND Date>='" << szDateEnd << "')";
+						szQuery << "SELECT MIN(Temperature), MAX(Temperature), MIN(Chill), MAX(Chill), MAX(Humidity), MAX(Barometer), MIN(DewPoint), AVG(Temperature), MIN(SetPoint), MAX(SetPoint), AVG(SetPoint) FROM Temperature WHERE (DeviceRowID=" << idx << " AND Date>='" << szDateEnd << "')";
 						result = m_sql.query(szQuery.str());
 						if (result.size() > 0)
 						{
@@ -15426,6 +15966,16 @@ namespace http {
 								double dp = ConvertTemperature(atof(sd[6].c_str()), tempsign);
 								root["result"][ii]["dp"] = dp;
 							}
+					if (sendSet)
+					{
+						double sm = ConvertTemperature(atof(sd[8].c_str()), tempsign);
+						double sx = ConvertTemperature(atof(sd[9].c_str()), tempsign);
+						double se = ConvertTemperature(atof(sd[10].c_str()), tempsign);
+						
+						root["result"][ii]["sm"] = sm;
+						root["result"][ii]["se"] = se;
+						root["result"][ii]["sx"] = sx;
+					}
 							ii++;
 						}
 					}

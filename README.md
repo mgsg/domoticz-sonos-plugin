@@ -8,11 +8,28 @@ Some use cases
     - complex wakeup/alarm scenarios (first soft music, later news, later switch music to the kitchen...)
     - voice announcements (power consumption above threshold, front bell ringing, bathroom lights on for more than xxx...)
 
+Changes in v0.53
+    - Based on Domoticz v2180
+    - Not using additional boost libraries anymore: Now using std::map instead of boost::unordered_map. 
+    - Bug fix: Volume showing 100% when playing. 
+    - Bug fix: "Say" command in rest API and in JavaScript code now in sync.
+
+    Known bugs/limitations:
+    - Deleting Sonos hardware gives segmentation fault. (Code changed but still happening sometimes).
+    - Error in log: "Error: Error opening url:" - Maybe related to url base64 encoding.
+    - UPnP tab still in "alpha" state:
+      - UPnP devices change order on every status change (last changed device shown first)
+      - Volume slider behaves differently in Firefox/Chrome/Safari. Sometimes hangs on the mouse.
+      - Play/stop button sometimes unresponsive
+    - Volume level ocassionally doesn't refresh in the Web UI
+    - Occasional error: Sonos hardware (11) thread seems to have ended unexpectedly
+    
 Changes in v0.52
     - Code refactored from it's C origin to a more OO paradigm. 
     - Delete devices from last version! Now only one device for each MediaRenderer device (speaker, TV, Kodi...)
     - Upgraded Json API with specific commands for UPnP devices
     - New UI tab for UPnP devices. 
+    - Remerged with Domoticz v2180
 
 Changes in v0.51
     - Debug logs still activated
@@ -54,23 +71,12 @@ Prerequisites:
     - Some UPnP Media Renderer. Sonos is my primary target. Other hardware could work (test at your own risk).
     - I would strongly suggest to use monit to restart Domoticz if testing new UPnP equipment.
 
-Known bugs/limitations:
-
-    - For some Sonos streams, a warning can be seen in the log: I assume it's a libsoup problem (domoticz and sonos continue $
-    - Volume level ocassionally doesn't refresh in the Web UI
-    - Glib instead of BOOST libraries used (much has been already migrated)
-    - Size of the executable is too big!  
-    - Polling inteval must be lower than 20secs; if not: you get Error:
-    Sonos hardware (11) thread seems to have ended unexpectedly
-    - Play:1 temp sensor monitor disabled by default -limited interest for HA
-    - Avoid playing if URI=No stream!!!
-
 Runtime instructions:
 
     - Activate the Sonos hardware in the Setup->Hardware section
-    - After some minutes, Domoticz will identify 4 devices for each Sonos speaker in the Setup->Devices section
-    - Add one device for Play/Pause/Volume (dimmer type), and three devices for TTS, Preset 1 (P1) and Preset 2 (P2) - (Push On button type)
-    - Create three new String-type user variables (maybe in some future version this ones will have to be created automatically):
+    - After some minutes, Domoticz will identify 1 device for each Sonos speaker in the Setup->Devices section
+    - Add device for Play/Pause/Volume with dimmer type
+    - Create three new String-type user variables:
     sonos-tts f.i.: Welcome to the Domoticz home
     sonos-preset-1 f.i.: x-rincon-mp3radio://radioclasica.rtve.stream.flumotion.com/rtve/radioclasica.mp3.m3u (check for your favorite stations looking for x-rincon-mp3radio on the web)
     sonos-preset-2

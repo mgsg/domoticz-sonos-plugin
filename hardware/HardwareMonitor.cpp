@@ -35,6 +35,14 @@
 
 extern bool bHasInternalTemperature;
 extern std::string szInternalTemperatureCommand;
+
+extern bool bHasInternalVoltage;
+extern std::string szInternalVoltageCommand;
+
+extern bool bHasInternalCurrent;
+extern std::string szInternalCurrentCommand;
+
+
 #define round(a) ( int ) ( a + .5 )
 
 CHardwareMonitor::CHardwareMonitor()
@@ -193,6 +201,39 @@ void CHardwareMonitor::SendVoltage(const unsigned long Idx, const float Volt, co
 	}
 }
 
+void CHardwareMonitor::SendCurrent(const unsigned long Idx, const float Curr, const std::string &defaultname)
+{
+	bool bDeviceExits = true;
+	std::stringstream szQuery;
+	std::vector<std::vector<std::string> > result;
+
+	char szTmp[30];
+	sprintf(szTmp, "%08X", (unsigned int)Idx);
+
+	szQuery << "SELECT Name FROM DeviceStatus WHERE (HardwareID==" << m_HwdID << ") AND (DeviceID=='" << szTmp << "') AND (Type==" << int(pTypeGeneral) << ") AND (Subtype==" << int(sTypeCurrent) << ")";
+	result = m_sql.query(szQuery.str());
+	if (result.size() < 1)
+	{
+		bDeviceExits = false;
+	}
+
+	_tGeneralDevice gDevice;
+	gDevice.subtype = sTypeCurrent;
+	gDevice.id = 1;
+	gDevice.floatval1 = Curr;
+	gDevice.intval1 = static_cast<int>(Idx);
+	sDecodeRXMessage(this, (const unsigned char *)&gDevice);
+
+	if (!bDeviceExits)
+	{
+		//Assign default name for device
+		szQuery.clear();
+		szQuery.str("");
+		szQuery << "UPDATE DeviceStatus SET Name='" << defaultname << "' WHERE (HardwareID==" << m_HwdID << ") AND (DeviceID=='" << szTmp << "') AND (Type==" << int(pTypeGeneral) << ") AND (Subtype==" << int(sTypeCurrent) << ")";
+		result = m_sql.query(szQuery.str());
+	}
+}
+
 void CHardwareMonitor::SendTempSensor(const int Idx, const float Temp, const std::string &defaultname)
 {
 	bool bDeviceExits = true;
@@ -327,22 +368,74 @@ void CHardwareMonitor::GetInternalTemperature()
 	}
 }
 
+void CHardwareMonitor::GetInternalVoltage()
+{
+	std::vector<std::string> ret = ExecuteCommandAndReturn(szInternalVoltageCommand.c_str());
+	if (ret.size() < 1)
+		return;
+	std::string tmpline = ret[0];
+	if (tmpline.find("volt=") == std::string::npos)
+		return;
+	tmpline = tmpline.substr(5);
+	size_t pos = tmpline.find("'");
+	if (pos != std::string::npos)
+	{
+		tmpline = tmpline.substr(0, pos);
+	}
+
+	float voltage = static_cast<float>(atof(tmpline.c_str()));
+	if (voltage == 0)
+		return; //hardly possible for a on board temp sensor, if it is, it is probably not working
+
+	SendVoltage(1, voltage, "Internal Voltage");
+}
+
+void CHardwareMonitor::GetInternalCurrent()
+{
+	std::vector<std::string> ret = ExecuteCommandAndReturn(szInternalCurrentCommand.c_str());
+	if (ret.size() < 1)
+		return;
+	std::string tmpline = ret[0];
+	if (tmpline.find("curr=") == std::string::npos)
+		return;
+	tmpline = tmpline.substr(5);
+	size_t pos = tmpline.find("'");
+	if (pos != std::string::npos)
+	{
+		tmpline = tmpline.substr(0, pos);
+	}
+
+	float current = static_cast<float>(atof(tmpline.c_str()));
+	if (current == 0)
+		return; //hardly possible for a on board temp sensor, if it is, it is probably not working
+
+	SendCurrent(1, current, "Internal Current");
+}
+
 void CHardwareMonitor::FetchData()
 {
 #ifdef WIN32
 	if (IsOHMRunning()) {
-//		_log.Log(LOG_NORM,"Hardware Monitor: Fetching data (System sensors)");		// m_g_s_g - Sonos
+//		_log.Log(LOG_NORM,"Hardware Monitor: Fetching data (System sensors)");
 		RunWMIQuery("Sensor","Temperature");
 		RunWMIQuery("Sensor","Load");
 		RunWMIQuery("Sensor","Fan");
 		RunWMIQuery("Sensor","Voltage");
 	}
 #elif defined __linux__
-//	_log.Log(LOG_NORM,"Hardware Monitor: Fetching data (System sensors)");			// m_g_s_g - Sonos
+//	_log.Log(LOG_NORM,"Hardware Monitor: Fetching data (System sensors)");
 	FetchUnixData();
 	if (bHasInternalTemperature)
 	{
 		GetInternalTemperature();
+	}
+	if (bHasInternalVoltage)
+	{
+		GetInternalVoltage();
+	}
+	if (bHasInternalCurrent)
+	{
+		GetInternalCurrent();
 	}
 #endif
 }
@@ -356,34 +449,35 @@ void CHardwareMonitor::UpdateSystemSensor(const std::string& qType, const int di
 		return;
 	}
 	int doffset = 0;
-	int dsubtype=0;
 	if (qType == "Temperature")
 	{
-		dsubtype = sTypeSystemTemp;
 		doffset = 1000;
 		float temp = static_cast<float>(atof(devValue.c_str()));
 		SendTempSensor(doffset + dindex, temp, devName);
 	}
 	else if (qType == "Load")
 	{
-		dsubtype = sTypePercentage;
 		doffset = 1100;
 		float perc = static_cast<float>(atof(devValue.c_str()));
 		SendPercentage(doffset + dindex, perc, devName);
 	}
 	else if (qType == "Fan")
 	{
-		dsubtype = sTypeFan;
 		doffset = 1200;
 		int fanspeed = atoi(devValue.c_str());
 		SendFanSensor(doffset + dindex, fanspeed, devName);
 	}
 	else if (qType == "Voltage")
 	{
-		dsubtype = sTypeVoltage;
 		doffset = 1300;
 		float volt = static_cast<float>(atof(devValue.c_str()));
 		SendVoltage(doffset + dindex, volt, devName);
+	}
+	else if (qType == "Current")
+	{
+		doffset = 1400;
+		float curr = static_cast<float>(atof(devValue.c_str()));
+		SendCurrent(doffset + dindex, curr, devName);
 	}
 	return;
 }
